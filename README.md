@@ -27,6 +27,11 @@ cd ~/dev/dotfiles
 The installer detects `macos`, `linux`, `wsl`, or `windows`.
 
 - first, it runs `git pull --ff-only` in the dotfiles repo so setup uses the latest checkout when possible
+- installs packages automatically unless `DOTFILES_SKIP_PACKAGES=1` is set
+- macOS uses `brew bundle`
+- Linux/WSL uses `apt-get`, `dnf`, or `yum`; this covers Amazon Linux on EC2 through `dnf`/`yum`
+- Linux also installs lazygit, starship, zoxide, and Atuin through upstream install scripts/releases when packages are not available
+- Codex and Claude CLIs install through npm into `$HOME/.local`
 - links `.ignore` to `~/.ignore`
 - macOS/Linux/WSL: links `.tmux.conf`
 - macOS: links Ghostty and lazygit from their `~/Library/Application Support/...` locations
@@ -78,6 +83,7 @@ Linux/WSL:
 
 ```sh
 cat ~/dev/dotfiles/os/linux/apt-packages.txt
+cat ~/dev/dotfiles/os/linux/dnf-packages.txt
 ```
 
 Windows:
