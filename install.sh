@@ -208,6 +208,7 @@ main() {
     case "$os_name" in
         macos|linux|wsl)
             ensure_zsh_setup
+            link_file "$DOTFILES_DIR/.ignore" "$HOME/.ignore"
             link_file "$DOTFILES_DIR/.tmux.conf" "$HOME/.tmux.conf"
             if [ "$os_name" = "macos" ]; then
                 link_macos_configs
@@ -218,11 +219,13 @@ main() {
             ;;
         windows)
             ensure_zsh_setup
+            link_file "$DOTFILES_DIR/.ignore" "$HOME/.ignore"
             link_windows_configs
             print_missing git gh lazygit starship zoxide nvim rg eza bat jq fzf
             ;;
         *)
             ensure_zsh_setup
+            link_file "$DOTFILES_DIR/.ignore" "$HOME/.ignore"
             print_missing zsh git gh
             ;;
     esac

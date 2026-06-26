@@ -5,6 +5,7 @@ Personal shell and terminal setup.
 ## Includes
 
 - `zsh_stuff`
+- `.ignore`
 - `.tmux.conf`
 - `config/nvim`
 - `config/atuin`
@@ -26,6 +27,7 @@ cd ~/dev/dotfiles
 The installer detects `macos`, `linux`, `wsl`, or `windows`.
 
 - first, it runs `git pull --ff-only` in the dotfiles repo so setup uses the latest checkout when possible
+- links `.ignore` to `~/.ignore`
 - macOS/Linux/WSL: links `.tmux.conf`
 - macOS: links Ghostty and lazygit from their `~/Library/Application Support/...` locations
 - Linux/WSL: links Ghostty and lazygit under `~/.config/...`
@@ -50,6 +52,7 @@ source "/path/to/dotfiles/zsh_stuff"
 
 ```sh
 ~/.tmux.conf -> ~/dev/dotfiles/.tmux.conf
+~/.ignore -> ~/dev/dotfiles/.ignore
 ~/.config/nvim -> ~/dev/dotfiles/config/nvim
 ~/.config/atuin -> ~/dev/dotfiles/config/atuin
 ~/.config/git/ignore -> ~/dev/dotfiles/config/git/ignore

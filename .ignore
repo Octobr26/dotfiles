@@ -1,0 +1,11 @@
+!*
+node_modules/
+.git/
+.aws-sam/
+mochawesome-report*/
+.amplify/
+.amplify-hosting/
+*-lock.*
+.ruff_cache/
+.DS_Store/
+
