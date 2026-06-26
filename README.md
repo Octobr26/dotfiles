@@ -25,6 +25,7 @@ cd ~/dev/dotfiles
 
 The installer detects `macos`, `linux`, `wsl`, or `windows`.
 
+- first, it runs `git pull --ff-only` in the dotfiles repo so setup uses the latest checkout when possible
 - macOS/Linux/WSL: links `.tmux.conf`
 - macOS: links Ghostty and lazygit from their `~/Library/Application Support/...` locations
 - Linux/WSL: links Ghostty and lazygit under `~/.config/...`

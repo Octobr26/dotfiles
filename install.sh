@@ -4,6 +4,23 @@ set -euo pipefail
 DOTFILES_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 BACKUP_DIR="$HOME/.dotfiles-backup/$(date +%Y%m%d-%H%M%S)"
 
+update_dotfiles_repo() {
+    if ! command -v git >/dev/null 2>&1; then
+        printf 'warn: git not found; skipping dotfiles update\n'
+        return
+    fi
+
+    if ! git -C "$DOTFILES_DIR" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+        printf 'warn: %s is not a git checkout; skipping dotfiles update\n' "$DOTFILES_DIR"
+        return
+    fi
+
+    printf 'update: git pull --ff-only\n'
+    if ! git -C "$DOTFILES_DIR" pull --ff-only; then
+        printf 'warn: dotfiles update failed; continuing with local checkout\n'
+    fi
+}
+
 detect_os() {
     case "$(uname -s)" in
         Darwin)
@@ -184,6 +201,9 @@ main() {
 
     printf 'dotfiles: %s\n' "$DOTFILES_DIR"
     printf 'detected: %s\n\n' "$os_name"
+
+    update_dotfiles_repo
+    printf '\n'
 
     case "$os_name" in
         macos|linux|wsl)
