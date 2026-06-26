@@ -30,6 +30,7 @@ assert_file_contains() {
 export HOME="$tmpdir/home"
 export DOTFILES_OS_RELEASE_FILE="$tmpdir/os-release"
 export DOTFILES_TREE_SITTER_CLI_VERSIONS="9.9.9 0.20.10"
+export DOTFILES_ZIG_VERSION="0.13.0"
 mkdir -p "$HOME" "$tmpdir/bin"
 
 cat > "$DOTFILES_OS_RELEASE_FILE" <<'EOF'
@@ -56,6 +57,51 @@ esac
 EOF
 chmod +x "$tmpdir/bin/cargo"
 export CARGO_LOG="$tmpdir/cargo.log"
+
+cat > "$tmpdir/bin/curl" <<'EOF'
+#!/usr/bin/env bash
+printf '%s\n' "$*" >> "$CURL_LOG"
+output=""
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    -o|--output)
+      shift
+      output=$1
+      ;;
+  esac
+  shift || true
+done
+if [ -n "$output" ]; then
+  printf 'fake zig archive\n' > "$output"
+fi
+EOF
+chmod +x "$tmpdir/bin/curl"
+export CURL_LOG="$tmpdir/curl.log"
+
+cat > "$tmpdir/bin/tar" <<'EOF'
+#!/usr/bin/env bash
+dest=""
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    -C)
+      shift
+      dest=$1
+      ;;
+  esac
+  shift || true
+done
+[ -n "$dest" ] || exit 2
+for asset in zig-aarch64-linux-0.13.0 zig-x86_64-linux-0.13.0; do
+  mkdir -p "$dest/$asset"
+  cat > "$dest/$asset/zig" <<'BIN'
+#!/usr/bin/env bash
+echo "0.13.0"
+BIN
+  chmod +x "$dest/$asset/zig"
+done
+EOF
+chmod +x "$tmpdir/bin/tar"
+
 export PATH="$tmpdir/bin:$PATH"
 
 source "$repo_dir/install.sh"
@@ -67,6 +113,7 @@ fi
 
 managed_linux_tools=$(managed_tools_for_os linux)
 assert_contains "$managed_linux_tools" "tree-sitter" "linux managed tools include tree-sitter"
+assert_contains "$managed_linux_tools" "zig" "linux managed tools include zig"
 
 ensure_bash_setup
 assert_file_contains "$HOME/.bashrc" '# >>> dotfiles amazon linux bash >>>' "bashrc block marker"
@@ -76,9 +123,19 @@ ensure_readline_setup
 assert_file_contains "$HOME/.inputrc" '"\e[A": previous-history' "inputrc binds up history"
 assert_file_contains "$HOME/.inputrc" '"\C-?": backward-delete-char' "inputrc binds delete/backspace"
 
+install_zig_linux
+assert_file_contains "$CURL_LOG" 'https://ziglang.org/download/0.13.0/zig-' "zig installer downloads pinned release"
+if [ ! -x "$HOME/.local/bin/zig" ]; then
+    printf 'not ok: zig installed into local bin\n' >&2
+    exit 1
+fi
+
 install_tree_sitter_cli_linux
 assert_file_contains "$CARGO_LOG" '--version 9.9.9' "tree-sitter installer tries first version"
 assert_file_contains "$CARGO_LOG" '--version 0.20.10' "tree-sitter installer falls back"
+
+assert_file_contains "$repo_dir/config/nvim/lua/plugins/treesitter.lua" 'vim.env.CC = "zig cc"' "Neovim Treesitter uses Zig C compiler"
+assert_file_contains "$repo_dir/config/nvim/lua/plugins/treesitter.lua" 'vim.env.CXX = "zig c++"' "Neovim Treesitter uses Zig C++ compiler"
 
 mkdir -p "$HOME/.local/share/nvim/mason/bin"
 printf 'broken prebuilt\n' > "$HOME/.local/share/nvim/mason/bin/tree-sitter"

@@ -19,4 +19,5 @@ rust
 tar
 tmux
 unzip
+xz
 zsh

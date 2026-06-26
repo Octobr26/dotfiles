@@ -14,5 +14,6 @@ ripgrep
 rustc
 starship
 tmux
+xz-utils
 zoxide
 zsh

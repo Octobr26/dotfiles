@@ -53,7 +53,7 @@ managed_tools_for_os() {
             printf '%s\n' git zsh tmux lazygit starship zoxide atuin nvim node npm pnpm gh rg fd eza bat jq fzf codex claude
             ;;
         linux|wsl)
-            printf '%s\n' git zsh tmux lazygit starship zoxide atuin nvim tree-sitter node npm pnpm gh rg fd eza bat jq fzf codex claude
+            printf '%s\n' git zsh tmux lazygit starship zoxide atuin nvim zig tree-sitter node npm pnpm gh rg fd eza bat jq fzf codex claude
             ;;
         windows)
             printf '%s\n' git node npm pnpm gh lazygit starship zoxide nvim rg fd eza bat jq fzf codex claude
@@ -77,6 +77,9 @@ tool_version() {
             ;;
         nvim)
             output=$(nvim --version 2>/dev/null || true)
+            ;;
+        zig)
+            output=$(zig version 2>/dev/null || true)
             ;;
         eza)
             output=$(eza --version 2>/dev/null | sed -n '2p' || true)
@@ -155,7 +158,7 @@ print_update_candidates() {
                     printf '  ok: apt packages current\n'
                 fi
             elif command -v dnf >/dev/null 2>&1; then
-                output=$(dnf check-update git zsh tmux rust cargo nodejs npm jq ripgrep fd-find fzf bat gh eza 2>/dev/null || true)
+                output=$(dnf check-update git zsh tmux rust cargo nodejs npm jq ripgrep fd-find fzf bat gh eza xz 2>/dev/null || true)
                 if [ -n "$output" ]; then
                     printf '  dnf updates still available for managed packages:\n'
                     print_limited_output "$output" 20
@@ -163,7 +166,7 @@ print_update_candidates() {
                     printf '  ok: dnf managed packages current\n'
                 fi
             elif command -v yum >/dev/null 2>&1; then
-                output=$(yum check-update git zsh tmux rust cargo nodejs npm jq ripgrep fd-find fzf bat gh eza 2>/dev/null || true)
+                output=$(yum check-update git zsh tmux rust cargo nodejs npm jq ripgrep fd-find fzf bat gh eza xz 2>/dev/null || true)
                 if [ -n "$output" ]; then
                     printf '  yum updates still available for managed packages:\n'
                     print_limited_output "$output" 20
@@ -745,6 +748,60 @@ install_neovim_linux() {
     rm -rf "$tmpdir"
 }
 
+install_zig_linux() {
+    local version="${DOTFILES_ZIG_VERSION:-0.13.0}"
+    local installed_version
+    installed_version=$( (zig version 2>/dev/null || true) | sed -n '1p')
+
+    if [ "$installed_version" = "$version" ]; then
+        printf 'ok: Zig %s current\n' "$version"
+        return
+    fi
+
+    if [ -n "$installed_version" ] && ! tool_updates_enabled; then
+        printf 'ok: Zig %s installed\n' "$installed_version"
+        return
+    fi
+
+    if ! command -v curl >/dev/null 2>&1 || ! command -v tar >/dev/null 2>&1; then
+        printf 'warn: curl/tar missing; cannot install Zig release archive\n'
+        return
+    fi
+
+    local arch
+    case "$(uname -m)" in
+        x86_64|amd64)
+            arch="x86_64-linux"
+            ;;
+        aarch64|arm64)
+            arch="aarch64-linux"
+            ;;
+        *)
+            printf 'warn: unsupported architecture for Zig install: %s\n' "$(uname -m)"
+            return
+            ;;
+    esac
+
+    local asset="zig-${arch}-${version}"
+    local install_dir="$HOME/.local/opt/$asset"
+    local tmpdir
+    tmpdir=$(mktemp -d)
+    mkdir -p "$HOME/.local/bin" "$HOME/.local/opt"
+
+    if curl -fsSL "https://ziglang.org/download/${version}/${asset}.tar.xz" -o "$tmpdir/zig.tar.xz" &&
+        tar -xJf "$tmpdir/zig.tar.xz" -C "$tmpdir"; then
+        rm -rf "$install_dir"
+        mv "$tmpdir/$asset" "$install_dir"
+        rm -f "$HOME/.local/bin/zig"
+        ln -s "$install_dir/zig" "$HOME/.local/bin/zig"
+        printf 'install: Zig %s -> %s\n' "$version" "$HOME/.local/bin/zig"
+    else
+        printf 'warn: failed to install Zig %s release archive\n' "$version"
+    fi
+
+    rm -rf "$tmpdir"
+}
+
 install_tree_sitter_cli_linux() {
     local versions
     local version
@@ -852,11 +909,11 @@ install_macos_packages() {
 install_linux_packages() {
     if command -v apt-get >/dev/null 2>&1; then
         run_as_root apt-get update || printf 'warn: apt update failed; continuing\n'
-        install_packages_one_by_one apt-get git zsh tmux curl ca-certificates unzip tar gzip build-essential cargo rustc nodejs npm jq ripgrep fd-find fzf bat gh eza
+        install_packages_one_by_one apt-get git zsh tmux curl ca-certificates unzip tar gzip xz-utils build-essential cargo rustc nodejs npm jq ripgrep fd-find fzf bat gh eza
     elif command -v dnf >/dev/null 2>&1; then
-        install_packages_one_by_one dnf git zsh tmux curl ca-certificates unzip tar gzip gcc gcc-c++ make rust cargo nodejs npm jq ripgrep fd-find fzf bat gh eza
+        install_packages_one_by_one dnf git zsh tmux curl ca-certificates unzip tar gzip xz gcc gcc-c++ make rust cargo nodejs npm jq ripgrep fd-find fzf bat gh eza
     elif command -v yum >/dev/null 2>&1; then
-        install_packages_one_by_one yum git zsh tmux curl ca-certificates unzip tar gzip gcc gcc-c++ make rust cargo nodejs npm jq ripgrep fd-find fzf bat gh eza
+        install_packages_one_by_one yum git zsh tmux curl ca-certificates unzip tar gzip xz gcc gcc-c++ make rust cargo nodejs npm jq ripgrep fd-find fzf bat gh eza
     else
         printf 'warn: supported package manager not found; skipping OS package install\n'
     fi
@@ -865,6 +922,7 @@ install_linux_packages() {
     install_ripgrep_linux
     install_fd_linux
     install_neovim_linux
+    install_zig_linux
     install_tree_sitter_cli_linux
     if is_amazon_linux; then
         ensure_mason_tree_sitter_uses_local_cli
@@ -1014,7 +1072,7 @@ main() {
                 print_missing zsh tmux lazygit starship zoxide atuin nvim pnpm gh rg fd eza bat jq fzf
             else
                 link_linux_configs
-                print_missing zsh tmux lazygit starship zoxide atuin nvim tree-sitter pnpm gh rg fd eza bat jq fzf
+                print_missing zsh tmux lazygit starship zoxide atuin nvim zig tree-sitter pnpm gh rg fd eza bat jq fzf
             fi
             ;;
         windows)
