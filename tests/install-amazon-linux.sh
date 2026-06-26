@@ -29,7 +29,7 @@ assert_file_contains() {
 
 export HOME="$tmpdir/home"
 export DOTFILES_OS_RELEASE_FILE="$tmpdir/os-release"
-export DOTFILES_TREE_SITTER_CLI_VERSIONS="9.9.9 0.20.10"
+export DOTFILES_TREE_SITTER_CLI_VERSION="0.22.6"
 export DOTFILES_ZIG_VERSION="0.13.0"
 mkdir -p "$HOME" "$tmpdir/bin"
 
@@ -38,29 +38,17 @@ ID="amzn"
 VERSION_ID="2023"
 EOF
 
-cat > "$tmpdir/bin/cargo" <<'EOF'
+cat > "$tmpdir/bin/rustc" <<'EOF'
 #!/usr/bin/env bash
-printf '%s\n' "$*" >> "$CARGO_LOG"
-case "$*" in
-  *"9.9.9"*) exit 1 ;;
-  *"0.20.10"*)
-    mkdir -p "$HOME/.local/bin"
-    cat > "$HOME/.local/bin/tree-sitter" <<'BIN'
-#!/usr/bin/env bash
-echo "tree-sitter 0.20.10"
-BIN
-    chmod +x "$HOME/.local/bin/tree-sitter"
-    exit 0
-    ;;
-  *) exit 2 ;;
-esac
+echo "rustc 1.68.2"
 EOF
-chmod +x "$tmpdir/bin/cargo"
+chmod +x "$tmpdir/bin/rustc"
 export CARGO_LOG="$tmpdir/cargo.log"
 
 cat > "$tmpdir/bin/curl" <<'EOF'
 #!/usr/bin/env bash
 printf '%s\n' "$*" >> "$CURL_LOG"
+original="$*"
 output=""
 while [ "$#" -gt 0 ]; do
   case "$1" in
@@ -72,7 +60,45 @@ while [ "$#" -gt 0 ]; do
   shift || true
 done
 if [ -n "$output" ]; then
-  printf 'fake zig archive\n' > "$output"
+  case "$original" in
+    *"https://sh.rustup.rs"*)
+      cat > "$output" <<'RUSTUP'
+#!/usr/bin/env bash
+mkdir -p "$HOME/.cargo/bin"
+cat > "$HOME/.cargo/bin/rustc" <<'BIN'
+#!/usr/bin/env bash
+echo "rustc 1.85.0"
+BIN
+cat > "$HOME/.cargo/bin/cargo" <<'BIN'
+#!/usr/bin/env bash
+printf '%s\n' "$*" >> "$CARGO_LOG"
+case "$*" in
+  *"tree-sitter-cli --version 0.22.6"*)
+    mkdir -p "$HOME/.local/bin"
+    cat > "$HOME/.local/bin/tree-sitter" <<'TS'
+#!/usr/bin/env bash
+echo "tree-sitter 0.22.6"
+TS
+    chmod +x "$HOME/.local/bin/tree-sitter"
+    exit 0
+    ;;
+  *) exit 2 ;;
+esac
+BIN
+cat > "$HOME/.cargo/bin/rustup" <<'BIN'
+#!/usr/bin/env bash
+exit 0
+BIN
+chmod +x "$HOME/.cargo/bin/rustc" "$HOME/.cargo/bin/cargo" "$HOME/.cargo/bin/rustup"
+cat > "$HOME/.cargo/env" <<'ENV'
+export PATH="$HOME/.cargo/bin:$PATH"
+ENV
+RUSTUP
+      ;;
+    *)
+      printf 'fake zig archive\n' > "$output"
+      ;;
+  esac
 fi
 EOF
 chmod +x "$tmpdir/bin/curl"
@@ -114,10 +140,12 @@ fi
 managed_linux_tools=$(managed_tools_for_os linux)
 assert_contains "$managed_linux_tools" "tree-sitter" "linux managed tools include tree-sitter"
 assert_contains "$managed_linux_tools" "zig" "linux managed tools include zig"
+assert_contains "$managed_linux_tools" "rustc" "linux managed tools include rustc"
+assert_contains "$managed_linux_tools" "cargo" "linux managed tools include cargo"
 
 ensure_bash_setup
 assert_file_contains "$HOME/.bashrc" '# >>> dotfiles amazon linux bash >>>' "bashrc block marker"
-assert_file_contains "$HOME/.bashrc" 'export PATH="$HOME/.local/bin:' "bashrc exposes local bin"
+assert_file_contains "$HOME/.bashrc" 'export PATH="$HOME/.cargo/bin:$HOME/.local/bin:' "bashrc exposes cargo and local bin"
 
 ensure_readline_setup
 assert_file_contains "$HOME/.inputrc" '"\e[A": previous-history' "inputrc binds up history"
@@ -130,9 +158,15 @@ if [ ! -x "$HOME/.local/bin/zig" ]; then
     exit 1
 fi
 
+install_rust_toolchain_linux
+assert_file_contains "$CURL_LOG" 'https://sh.rustup.rs' "rust installer uses rustup"
+if ! rustc --version | grep -Fq 'rustc 1.85.0'; then
+    printf 'not ok: rustup rustc is active after install\n' >&2
+    exit 1
+fi
+
 install_tree_sitter_cli_linux
-assert_file_contains "$CARGO_LOG" '--version 9.9.9' "tree-sitter installer tries first version"
-assert_file_contains "$CARGO_LOG" '--version 0.20.10' "tree-sitter installer falls back"
+assert_file_contains "$CARGO_LOG" '--version 0.22.6' "tree-sitter installer uses current compatible version"
 
 assert_file_contains "$repo_dir/config/nvim/lua/plugins/treesitter.lua" 'vim.env.CC = "zig cc"' "Neovim Treesitter uses Zig C compiler"
 assert_file_contains "$repo_dir/config/nvim/lua/plugins/treesitter.lua" 'vim.env.CXX = "zig c++"' "Neovim Treesitter uses Zig C++ compiler"

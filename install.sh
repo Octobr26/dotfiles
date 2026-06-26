@@ -3,7 +3,7 @@ set -euo pipefail
 
 DOTFILES_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 BACKUP_DIR="$HOME/.dotfiles-backup/$(date +%Y%m%d-%H%M%S)"
-export PATH="$HOME/.local/bin:$DOTFILES_DIR/scripts:$PATH"
+export PATH="$HOME/.cargo/bin:$HOME/.local/bin:$DOTFILES_DIR/scripts:$PATH"
 
 update_dotfiles_repo() {
     if ! command -v git >/dev/null 2>&1; then
@@ -53,7 +53,7 @@ managed_tools_for_os() {
             printf '%s\n' git zsh tmux lazygit starship zoxide atuin nvim node npm pnpm gh rg fd eza bat jq fzf codex claude
             ;;
         linux|wsl)
-            printf '%s\n' git zsh tmux lazygit starship zoxide atuin nvim zig tree-sitter node npm pnpm gh rg fd eza bat jq fzf codex claude
+            printf '%s\n' git zsh tmux lazygit starship zoxide atuin nvim rustc cargo zig tree-sitter node npm pnpm gh rg fd eza bat jq fzf codex claude
             ;;
         windows)
             printf '%s\n' git node npm pnpm gh lazygit starship zoxide nvim rg fd eza bat jq fzf codex claude
@@ -158,7 +158,7 @@ print_update_candidates() {
                     printf '  ok: apt packages current\n'
                 fi
             elif command -v dnf >/dev/null 2>&1; then
-                output=$(dnf check-update git zsh tmux rust cargo nodejs npm jq ripgrep fd-find fzf bat gh eza xz 2>/dev/null || true)
+                output=$(dnf check-update git zsh tmux nodejs npm jq ripgrep fd-find fzf bat gh eza xz 2>/dev/null || true)
                 if [ -n "$output" ]; then
                     printf '  dnf updates still available for managed packages:\n'
                     print_limited_output "$output" 20
@@ -166,7 +166,7 @@ print_update_candidates() {
                     printf '  ok: dnf managed packages current\n'
                 fi
             elif command -v yum >/dev/null 2>&1; then
-                output=$(yum check-update git zsh tmux rust cargo nodejs npm jq ripgrep fd-find fzf bat gh eza xz 2>/dev/null || true)
+                output=$(yum check-update git zsh tmux nodejs npm jq ripgrep fd-find fzf bat gh eza xz 2>/dev/null || true)
                 if [ -n "$output" ]; then
                     printf '  yum updates still available for managed packages:\n'
                     print_limited_output "$output" 20
@@ -329,6 +329,29 @@ is_amazon_linux() {
     [ "$id" = "amzn" ] || printf ' %s ' "$id_like" | grep -q ' amzn '
 }
 
+version_at_least() {
+    local current=$1
+    local minimum=$2
+
+    awk -v current="$current" -v minimum="$minimum" '
+        BEGIN {
+            split(current, c, ".")
+            split(minimum, m, ".")
+            for (i = 1; i <= 3; i++) {
+                c[i] += 0
+                m[i] += 0
+                if (c[i] > m[i]) {
+                    exit 0
+                }
+                if (c[i] < m[i]) {
+                    exit 1
+                }
+            }
+            exit 0
+        }
+    '
+}
+
 path_free_kb() {
     df -Pk "$1" 2>/dev/null | awk 'NR == 2 { print $4 }'
 }
@@ -461,7 +484,7 @@ ensure_bash_setup() {
     local bashrc="$HOME/.bashrc"
     local begin_marker="# >>> dotfiles amazon linux bash >>>"
     local end_marker="# <<< dotfiles amazon linux bash <<<"
-    local path_line="export PATH=\"\$HOME/.local/bin:$DOTFILES_DIR/scripts:\$PATH\""
+    local path_line="export PATH=\"\$HOME/.cargo/bin:\$HOME/.local/bin:$DOTFILES_DIR/scripts:\$PATH\""
     local block
 
     block=$(printf '%s\n%s\n%s\n' "$begin_marker" "$path_line" "$end_marker")
@@ -802,6 +825,56 @@ install_zig_linux() {
     rm -rf "$tmpdir"
 }
 
+install_rust_toolchain_linux() {
+    local min_version="${DOTFILES_RUST_MIN_VERSION:-1.74.1}"
+    local current_version
+
+    current_version=$( (rustc --version 2>/dev/null || true) | awk '{ print $2 }' | sed -n '1p')
+
+    if [ -n "$current_version" ] && version_at_least "$current_version" "$min_version"; then
+        if ! tool_updates_enabled; then
+            printf 'ok: rustc %s installed\n' "$current_version"
+            return
+        fi
+    fi
+
+    if command -v rustup >/dev/null 2>&1; then
+        rustup toolchain install stable --profile minimal || printf 'warn: failed to install Rust stable toolchain\n'
+        rustup default stable || printf 'warn: failed to set Rust stable as default\n'
+    else
+        if ! command -v curl >/dev/null 2>&1; then
+            printf 'warn: curl missing; cannot install Rust with rustup\n'
+            return
+        fi
+
+        local tmpdir
+        tmpdir=$(mktemp -d)
+
+        if curl --proto '=https' --tlsv1.2 -fsSL https://sh.rustup.rs -o "$tmpdir/rustup-init.sh"; then
+            sh "$tmpdir/rustup-init.sh" -y --default-toolchain stable --profile minimal || printf 'warn: rustup install failed\n'
+        else
+            printf 'warn: failed to download rustup installer\n'
+        fi
+
+        rm -rf "$tmpdir"
+    fi
+
+    if [ -f "$HOME/.cargo/env" ]; then
+        # shellcheck disable=SC1091
+        . "$HOME/.cargo/env"
+    fi
+
+    export PATH="$HOME/.cargo/bin:$PATH"
+    hash -r 2>/dev/null || true
+
+    current_version=$( (rustc --version 2>/dev/null || true) | awk '{ print $2 }' | sed -n '1p')
+    if [ -n "$current_version" ] && version_at_least "$current_version" "$min_version"; then
+        printf 'ok: rustc %s meets minimum %s\n' "$current_version" "$min_version"
+    else
+        printf 'warn: rustc %s is below required %s; tree-sitter-cli may fail\n' "${current_version:-missing}" "$min_version"
+    fi
+}
+
 install_tree_sitter_cli_linux() {
     local versions
     local version
@@ -813,7 +886,7 @@ install_tree_sitter_cli_linux() {
     elif [ -n "${DOTFILES_TREE_SITTER_CLI_VERSION:-}" ]; then
         versions="$DOTFILES_TREE_SITTER_CLI_VERSION"
     else
-        versions="0.22.6 0.20.10"
+        versions="0.22.6"
     fi
 
     installed_version=$( (tree-sitter --version 2>/dev/null || true) | sed -n 's/^tree-sitter \([^[:space:]]*\).*/\1/p' | head -n 1)
@@ -909,11 +982,11 @@ install_macos_packages() {
 install_linux_packages() {
     if command -v apt-get >/dev/null 2>&1; then
         run_as_root apt-get update || printf 'warn: apt update failed; continuing\n'
-        install_packages_one_by_one apt-get git zsh tmux curl ca-certificates unzip tar gzip xz-utils build-essential cargo rustc nodejs npm jq ripgrep fd-find fzf bat gh eza
+        install_packages_one_by_one apt-get git zsh tmux curl ca-certificates unzip tar gzip xz-utils build-essential nodejs npm jq ripgrep fd-find fzf bat gh eza
     elif command -v dnf >/dev/null 2>&1; then
-        install_packages_one_by_one dnf git zsh tmux curl ca-certificates unzip tar gzip xz gcc gcc-c++ make rust cargo nodejs npm jq ripgrep fd-find fzf bat gh eza
+        install_packages_one_by_one dnf git zsh tmux curl ca-certificates unzip tar gzip xz gcc gcc-c++ make nodejs npm jq ripgrep fd-find fzf bat gh eza
     elif command -v yum >/dev/null 2>&1; then
-        install_packages_one_by_one yum git zsh tmux curl ca-certificates unzip tar gzip xz gcc gcc-c++ make rust cargo nodejs npm jq ripgrep fd-find fzf bat gh eza
+        install_packages_one_by_one yum git zsh tmux curl ca-certificates unzip tar gzip xz gcc gcc-c++ make nodejs npm jq ripgrep fd-find fzf bat gh eza
     else
         printf 'warn: supported package manager not found; skipping OS package install\n'
     fi
@@ -923,6 +996,7 @@ install_linux_packages() {
     install_fd_linux
     install_neovim_linux
     install_zig_linux
+    install_rust_toolchain_linux
     install_tree_sitter_cli_linux
     if is_amazon_linux; then
         ensure_mason_tree_sitter_uses_local_cli
@@ -1072,7 +1146,7 @@ main() {
                 print_missing zsh tmux lazygit starship zoxide atuin nvim pnpm gh rg fd eza bat jq fzf
             else
                 link_linux_configs
-                print_missing zsh tmux lazygit starship zoxide atuin nvim zig tree-sitter pnpm gh rg fd eza bat jq fzf
+                print_missing zsh tmux lazygit starship zoxide atuin nvim rustc cargo zig tree-sitter pnpm gh rg fd eza bat jq fzf
             fi
             ;;
         windows)
