@@ -119,9 +119,16 @@ print_package_hint() {
     esac
 }
 
-ensure_zsh_source() {
+ensure_zsh_setup() {
     local zshrc="$HOME/.zshrc"
+    local begin_marker="# >>> dotfiles >>>"
+    local end_marker="# <<< dotfiles <<<"
+    local path_line="export PATH=\"$DOTFILES_DIR/scripts:\$PATH\""
     local source_line="source \"$DOTFILES_DIR/zsh_stuff\""
+    local block
+    local tmp
+
+    block=$(printf '%s\n%s\n%s\n%s\n' "$begin_marker" "$path_line" "$source_line" "$end_marker")
 
     if [ -L "$zshrc" ] && [ ! -e "$zshrc" ]; then
         mkdir -p "$BACKUP_DIR"
@@ -129,23 +136,46 @@ ensure_zsh_source() {
         printf 'backup: broken %s symlink -> %s/\n' "$zshrc" "$BACKUP_DIR"
     fi
 
-    if [ -f "$zshrc" ] && grep -Fq 'zsh_stuff' "$zshrc"; then
-        printf 'ok: %s already sources zsh_stuff\n' "$zshrc"
+    if [ ! -e "$zshrc" ]; then
+        printf '%s\n' "$block" > "$zshrc"
+        printf 'create: %s with dotfiles PATH/source block\n' "$zshrc"
         return
     fi
 
-    if [ ! -e "$zshrc" ]; then
-        printf '%s\n' "$source_line" > "$zshrc"
-        printf 'create: %s with zsh_stuff source\n' "$zshrc"
+    tmp=$(mktemp)
+
+    if grep -Fq "$begin_marker" "$zshrc"; then
+        awk -v begin="$begin_marker" -v end="$end_marker" '
+            $0 == begin {
+                in_block = 1
+                next
+            }
+            $0 == end {
+                in_block = 0
+                next
+            }
+            !in_block {
+                print
+            }
+        ' "$zshrc" > "$tmp"
+        {
+            printf '\n'
+            printf '%s\n' "$block"
+        } >> "$tmp"
+        mv "$tmp" "$zshrc"
+        printf 'ok: refreshed dotfiles PATH/source block in %s\n' "$zshrc"
         return
     fi
 
     {
+        grep -Fv 'zsh_stuff' "$zshrc" || true
         printf '\n# >>> dotfiles >>>\n'
+        printf '%s\n' "$path_line"
         printf '%s\n' "$source_line"
         printf '# <<< dotfiles <<<\n'
-    } >> "$zshrc"
-    printf 'update: added zsh_stuff source to %s\n' "$zshrc"
+    } > "$tmp"
+    mv "$tmp" "$zshrc"
+    printf 'update: added dotfiles PATH/source block to %s\n' "$zshrc"
 }
 
 main() {
@@ -157,7 +187,7 @@ main() {
 
     case "$os_name" in
         macos|linux|wsl)
-            ensure_zsh_source
+            ensure_zsh_setup
             link_file "$DOTFILES_DIR/.tmux.conf" "$HOME/.tmux.conf"
             if [ "$os_name" = "macos" ]; then
                 link_macos_configs
@@ -167,12 +197,12 @@ main() {
             print_missing zsh tmux lazygit starship zoxide atuin nvim pnpm gh rg eza bat jq fzf
             ;;
         windows)
-            ensure_zsh_source
+            ensure_zsh_setup
             link_windows_configs
             print_missing git gh lazygit starship zoxide nvim rg eza bat jq fzf
             ;;
         *)
-            ensure_zsh_source
+            ensure_zsh_setup
             print_missing zsh git gh
             ;;
     esac

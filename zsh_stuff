@@ -4,7 +4,9 @@ export KEYTIMEOUT=1
 dotfiles_source="${(%):-%x}"
 dotfiles_dir="${dotfiles_source:A:h}"
 
-export PATH="$HOME/.local/bin:$dotfiles_dir/scripts:$PATH"
+path=("$HOME/.local/bin" "$dotfiles_dir/scripts" $path)
+typeset -U path
+export PATH
 alias lg='lazygit'
 
 if command -v starship >/dev/null 2>&1; then

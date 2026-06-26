@@ -29,26 +29,21 @@ The installer detects `macos`, `linux`, `wsl`, or `windows`.
 - macOS: links Ghostty and lazygit from their `~/Library/Application Support/...` locations
 - Linux/WSL: links Ghostty and lazygit under `~/.config/...`
 - Windows: skips tmux because native Windows does not match tmux/zsh behavior well
-- zsh setup is automatic: `install.sh` adds a `zsh_stuff` source line to `~/.zshrc`
-- `zsh_stuff` adds this repo's `scripts/` folder to PATH
+- zsh setup is automatic: `install.sh` adds a managed block to `~/.zshrc`
+- that block adds this repo's `scripts/` folder to PATH and sources `zsh_stuff`
 - Existing files are moved to `~/.dotfiles-backup/<timestamp>/`
 - If symlinks are unavailable, the installer copies files instead
 
 ## zsh
 
-This repo does not own `~/.zshrc`. The installer adds this source line:
+This repo does not own `~/.zshrc`. The installer adds this managed block:
 
 ```zsh
+export PATH="/path/to/dotfiles/scripts:$PATH"
 source "/path/to/dotfiles/zsh_stuff"
 ```
 
-`zsh_stuff` then adds:
-
-```zsh
-/path/to/dotfiles/scripts
-```
-
-to PATH.
+`zsh_stuff` also keeps `scripts/` and `$HOME/.local/bin` in PATH when sourced directly.
 
 ## Current local links
 
