@@ -1,0 +1,7 @@
+Git.Git
+GitHub.cli
+ajeetdsouza.zoxide
+JesseDuffield.lazygit
+Neovim.Neovim
+OpenJS.NodeJS
+Starship.Starship

@@ -1,0 +1,13 @@
+atuin
+fzf
+git
+gh
+lazygit
+neovim
+nodejs
+npm
+ripgrep
+starship
+tmux
+zoxide
+zsh
