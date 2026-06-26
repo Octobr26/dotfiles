@@ -10,7 +10,6 @@ git
 gzip
 jq
 make
-neovim
 nodejs
 npm
 ripgrep

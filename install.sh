@@ -152,7 +152,7 @@ print_update_candidates() {
                     printf '  ok: apt packages current\n'
                 fi
             elif command -v dnf >/dev/null 2>&1; then
-                output=$(dnf check-update git zsh tmux nodejs npm jq ripgrep fzf bat neovim gh eza 2>/dev/null || true)
+                output=$(dnf check-update git zsh tmux nodejs npm jq ripgrep fzf bat gh eza 2>/dev/null || true)
                 if [ -n "$output" ]; then
                     printf '  dnf updates still available for managed packages:\n'
                     print_limited_output "$output" 20
@@ -160,7 +160,7 @@ print_update_candidates() {
                     printf '  ok: dnf managed packages current\n'
                 fi
             elif command -v yum >/dev/null 2>&1; then
-                output=$(yum check-update git zsh tmux nodejs npm jq ripgrep fzf bat neovim gh eza 2>/dev/null || true)
+                output=$(yum check-update git zsh tmux nodejs npm jq ripgrep fzf bat gh eza 2>/dev/null || true)
                 if [ -n "$output" ]; then
                     printf '  yum updates still available for managed packages:\n'
                     print_limited_output "$output" 20
@@ -343,7 +343,7 @@ install_lazygit_linux() {
     esac
 
     local version
-    version=$(curl -fsSL https://api.github.com/repos/jesseduffield/lazygit/releases/latest | sed -n 's/.*"tag_name": *"v\([^"]*\)".*/\1/p' | head -n 1)
+    version=$( (curl -fsSL https://api.github.com/repos/jesseduffield/lazygit/releases/latest || true) | sed -n 's/.*"tag_name": *"v\([^"]*\)".*/\1/p' | head -n 1)
 
     if [ -z "$version" ]; then
         printf 'warn: could not determine latest lazygit version\n'
@@ -368,6 +368,66 @@ install_lazygit_linux() {
         printf 'install: lazygit %s -> %s\n' "$version" "$HOME/.local/bin/lazygit"
     else
         printf 'warn: failed to install lazygit release\n'
+    fi
+
+    rm -rf "$tmpdir"
+}
+
+install_neovim_linux() {
+    if command -v nvim >/dev/null 2>&1 && ! tool_updates_enabled; then
+        return
+    fi
+
+    if ! command -v curl >/dev/null 2>&1 || ! command -v tar >/dev/null 2>&1; then
+        printf 'warn: curl/tar missing; cannot install Neovim release archive\n'
+        return
+    fi
+
+    local arch
+    case "$(uname -m)" in
+        x86_64|amd64)
+            arch="x86_64"
+            ;;
+        aarch64|arm64)
+            arch="arm64"
+            ;;
+        *)
+            printf 'warn: unsupported architecture for Neovim install: %s\n' "$(uname -m)"
+            return
+            ;;
+    esac
+
+    local version
+    version=$( (curl -fsSL https://api.github.com/repos/neovim/neovim/releases/latest || true) | sed -n 's/.*"tag_name": *"v\([^"]*\)".*/\1/p' | head -n 1)
+
+    if [ -z "$version" ]; then
+        printf 'warn: could not determine latest Neovim version\n'
+        return
+    fi
+
+    local installed_version
+    installed_version=$( (nvim --version 2>/dev/null || true) | sed -n 's/^NVIM v\([^[:space:]]*\).*/\1/p' | head -n 1)
+
+    if [ "$installed_version" = "$version" ]; then
+        printf 'ok: Neovim %s current\n' "$version"
+        return
+    fi
+
+    local asset="nvim-linux-${arch}"
+    local install_dir="$HOME/.local/opt/$asset"
+    local tmpdir
+    tmpdir=$(mktemp -d)
+    mkdir -p "$HOME/.local/bin" "$HOME/.local/opt"
+
+    if curl -fsSL "https://github.com/neovim/neovim/releases/latest/download/${asset}.tar.gz" -o "$tmpdir/nvim.tar.gz" &&
+        tar -xzf "$tmpdir/nvim.tar.gz" -C "$tmpdir"; then
+        rm -rf "$install_dir"
+        mv "$tmpdir/$asset" "$install_dir"
+        rm -f "$HOME/.local/bin/nvim"
+        ln -s "$install_dir/bin/nvim" "$HOME/.local/bin/nvim"
+        printf 'install: Neovim %s -> %s\n' "$version" "$HOME/.local/bin/nvim"
+    else
+        printf 'warn: failed to install Neovim release archive\n'
     fi
 
     rm -rf "$tmpdir"
@@ -402,16 +462,17 @@ install_macos_packages() {
 install_linux_packages() {
     if command -v apt-get >/dev/null 2>&1; then
         run_as_root apt-get update || printf 'warn: apt update failed; continuing\n'
-        install_packages_one_by_one apt-get git zsh tmux curl ca-certificates unzip tar gzip build-essential nodejs npm jq ripgrep fzf bat neovim gh eza
+        install_packages_one_by_one apt-get git zsh tmux curl ca-certificates unzip tar gzip build-essential nodejs npm jq ripgrep fzf bat gh eza
     elif command -v dnf >/dev/null 2>&1; then
-        install_packages_one_by_one dnf git zsh tmux curl ca-certificates unzip tar gzip gcc gcc-c++ make nodejs npm jq ripgrep fzf bat neovim gh eza
+        install_packages_one_by_one dnf git zsh tmux curl ca-certificates unzip tar gzip gcc gcc-c++ make nodejs npm jq ripgrep fzf bat gh eza
     elif command -v yum >/dev/null 2>&1; then
-        install_packages_one_by_one yum git zsh tmux curl ca-certificates unzip tar gzip gcc gcc-c++ make nodejs npm jq ripgrep fzf bat neovim gh eza
+        install_packages_one_by_one yum git zsh tmux curl ca-certificates unzip tar gzip gcc gcc-c++ make nodejs npm jq ripgrep fzf bat gh eza
     else
         printf 'warn: supported package manager not found; skipping OS package install\n'
     fi
 
     ensure_bat_command
+    install_neovim_linux
     install_lazygit_linux
     install_shell_tool_scripts_linux
 }

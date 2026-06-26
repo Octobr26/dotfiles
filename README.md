@@ -32,6 +32,7 @@ The installer detects `macos`, `linux`, `wsl`, or `windows`.
 - updates existing supported tools by default; set `DOTFILES_UPDATE_TOOLS=0` to only install missing Linux release/script tools
 - macOS uses `brew bundle`
 - Linux/WSL uses `apt-get`, `dnf`, or `yum`; this covers Amazon Linux on EC2 through `dnf`/`yum`
+- Linux installs or updates Neovim from the official release archive under `~/.local/opt`, avoiding older distro packages
 - Linux also installs or updates lazygit, starship, zoxide, and Atuin through upstream install scripts/releases when packages are not available
 - pnpm, Codex, and Claude CLIs install/update through npm into `$HOME/.local`
 - after package work, it reports any remaining Homebrew, Linux package-manager, or npm global updates it can see

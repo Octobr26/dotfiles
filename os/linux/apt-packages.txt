@@ -6,7 +6,6 @@ git
 gh
 jq
 lazygit
-neovim
 nodejs
 npm
 ripgrep
