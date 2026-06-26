@@ -22,19 +22,26 @@ The installer detects `macos`, `linux`, `wsl`, or `windows`.
 
 - macOS/Linux/WSL: links `.tmux.conf`
 - Windows: skips tmux because native Windows does not match tmux/zsh behavior well
-- zsh is manual: add `source "$HOME/dev/dotfiles/zsh_stuff"` to `~/.zshrc`
+- zsh setup is automatic: `install.sh` adds a `zsh_stuff` source line to `~/.zshrc`
+- `zsh_stuff` adds this repo's `scripts/` folder to PATH
 - Existing files are moved to `~/.dotfiles-backup/<timestamp>/`
 - If symlinks are unavailable, the installer copies files instead
 
 ## zsh
 
-This repo does not own `~/.zshrc`. Source the shared config manually:
+This repo does not own `~/.zshrc`. The installer adds this source line:
 
 ```zsh
-source "$HOME/dev/dotfiles/zsh_stuff"
+source "/path/to/dotfiles/zsh_stuff"
 ```
 
-Current local `~/.zshrc` uses that line.
+`zsh_stuff` then adds:
+
+```zsh
+/path/to/dotfiles/scripts
+```
+
+to PATH.
 
 ## Current local links
 

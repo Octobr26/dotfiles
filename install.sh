@@ -85,10 +85,33 @@ print_package_hint() {
     esac
 }
 
-print_zsh_hint() {
-    printf '\nManual zsh setup:\n'
-    printf '  Add this line to ~/.zshrc:\n'
-    printf '  source "$HOME/dev/dotfiles/zsh_stuff"\n'
+ensure_zsh_source() {
+    local zshrc="$HOME/.zshrc"
+    local source_line="source \"$DOTFILES_DIR/zsh_stuff\""
+
+    if [ -L "$zshrc" ] && [ ! -e "$zshrc" ]; then
+        mkdir -p "$BACKUP_DIR"
+        mv "$zshrc" "$BACKUP_DIR/"
+        printf 'backup: broken %s symlink -> %s/\n' "$zshrc" "$BACKUP_DIR"
+    fi
+
+    if [ -f "$zshrc" ] && grep -Fq 'zsh_stuff' "$zshrc"; then
+        printf 'ok: %s already sources zsh_stuff\n' "$zshrc"
+        return
+    fi
+
+    if [ ! -e "$zshrc" ]; then
+        printf '%s\n' "$source_line" > "$zshrc"
+        printf 'create: %s with zsh_stuff source\n' "$zshrc"
+        return
+    fi
+
+    {
+        printf '\n# >>> dotfiles >>>\n'
+        printf '%s\n' "$source_line"
+        printf '# <<< dotfiles <<<\n'
+    } >> "$zshrc"
+    printf 'update: added zsh_stuff source to %s\n' "$zshrc"
 }
 
 main() {
@@ -100,18 +123,20 @@ main() {
 
     case "$os_name" in
         macos|linux|wsl)
+            ensure_zsh_source
             link_file "$DOTFILES_DIR/.tmux.conf" "$HOME/.tmux.conf"
             print_missing zsh tmux lazygit starship zoxide atuin nvim pnpm gh rg
             ;;
         windows)
+            ensure_zsh_source
             print_missing git gh lazygit starship zoxide nvim
             ;;
         *)
+            ensure_zsh_source
             print_missing zsh git gh
             ;;
     esac
 
-    print_zsh_hint
     print_package_hint "$os_name"
 }
 

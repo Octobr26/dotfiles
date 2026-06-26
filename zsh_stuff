@@ -1,6 +1,10 @@
 bindkey -v
 export KEYTIMEOUT=1
-export PATH="$HOME/.local/bin:$HOME/dev/dotfiles/scripts:$PATH"
+
+dotfiles_source="${(%):-%x}"
+dotfiles_dir="${dotfiles_source:A:h}"
+
+export PATH="$HOME/.local/bin:$dotfiles_dir/scripts:$PATH"
 alias lg='lazygit'
 
 if command -v starship >/dev/null 2>&1; then
