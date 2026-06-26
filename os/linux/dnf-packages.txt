@@ -1,5 +1,6 @@
 bat
 ca-certificates
+cargo
 curl
 eza
 fd-find
@@ -14,6 +15,7 @@ make
 nodejs
 npm
 ripgrep
+rust
 tar
 tmux
 unzip

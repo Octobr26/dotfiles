@@ -49,8 +49,11 @@ tool_updates_enabled() {
 
 managed_tools_for_os() {
     case "$1" in
-        macos|linux|wsl)
+        macos)
             printf '%s\n' git zsh tmux lazygit starship zoxide atuin nvim node npm pnpm gh rg fd eza bat jq fzf codex claude
+            ;;
+        linux|wsl)
+            printf '%s\n' git zsh tmux lazygit starship zoxide atuin nvim tree-sitter node npm pnpm gh rg fd eza bat jq fzf codex claude
             ;;
         windows)
             printf '%s\n' git node npm pnpm gh lazygit starship zoxide nvim rg fd eza bat jq fzf codex claude
@@ -152,7 +155,7 @@ print_update_candidates() {
                     printf '  ok: apt packages current\n'
                 fi
             elif command -v dnf >/dev/null 2>&1; then
-                output=$(dnf check-update git zsh tmux nodejs npm jq ripgrep fd-find fzf bat gh eza 2>/dev/null || true)
+                output=$(dnf check-update git zsh tmux rust cargo nodejs npm jq ripgrep fd-find fzf bat gh eza 2>/dev/null || true)
                 if [ -n "$output" ]; then
                     printf '  dnf updates still available for managed packages:\n'
                     print_limited_output "$output" 20
@@ -160,7 +163,7 @@ print_update_candidates() {
                     printf '  ok: dnf managed packages current\n'
                 fi
             elif command -v yum >/dev/null 2>&1; then
-                output=$(yum check-update git zsh tmux nodejs npm jq ripgrep fd-find fzf bat gh eza 2>/dev/null || true)
+                output=$(yum check-update git zsh tmux rust cargo nodejs npm jq ripgrep fd-find fzf bat gh eza 2>/dev/null || true)
                 if [ -n "$output" ]; then
                     printf '  yum updates still available for managed packages:\n'
                     print_limited_output "$output" 20
@@ -294,6 +297,96 @@ run_as_root() {
     fi
 }
 
+os_release_value() {
+    local key=$1
+    local file="${DOTFILES_OS_RELEASE_FILE:-/etc/os-release}"
+
+    if [ ! -r "$file" ]; then
+        return 1
+    fi
+
+    awk -F= -v key="$key" '
+        $1 == key {
+            value = $2
+            gsub(/^"/, "", value)
+            gsub(/"$/, "", value)
+            print value
+            exit
+        }
+    ' "$file"
+}
+
+is_amazon_linux() {
+    local id
+    local id_like
+
+    id=$(os_release_value ID || true)
+    id_like=$(os_release_value ID_LIKE || true)
+
+    [ "$id" = "amzn" ] || printf ' %s ' "$id_like" | grep -q ' amzn '
+}
+
+path_free_kb() {
+    df -Pk "$1" 2>/dev/null | awk 'NR == 2 { print $4 }'
+}
+
+path_inode_used_percent() {
+    df -Pi "$1" 2>/dev/null | awk 'NR == 2 { gsub(/%/, "", $5); print $5 }'
+}
+
+amazon_linux_storage_is_low() {
+    local path=${1:-$HOME}
+    local min_free_kb=${DOTFILES_AMAZON_MIN_FREE_KB:-524288}
+    local max_inode_used_percent=${DOTFILES_AMAZON_MAX_INODE_USED_PERCENT:-95}
+    local free_kb
+    local inode_used_percent
+
+    free_kb=$(path_free_kb "$path")
+    inode_used_percent=$(path_inode_used_percent "$path")
+
+    if [ -n "$free_kb" ] && [ "$free_kb" -lt "$min_free_kb" ]; then
+        return 0
+    fi
+
+    if [ -n "$inode_used_percent" ] && [ "$inode_used_percent" -ge "$max_inode_used_percent" ]; then
+        return 0
+    fi
+
+    return 1
+}
+
+clean_amazon_linux_package_caches() {
+    printf 'amazon-linux: cleaning package caches and old journal entries\n'
+
+    if command -v dnf >/dev/null 2>&1; then
+        run_as_root dnf clean all || printf 'warn: dnf cache clean failed\n'
+    elif command -v yum >/dev/null 2>&1; then
+        run_as_root yum clean all || printf 'warn: yum cache clean failed\n'
+    fi
+
+    if command -v journalctl >/dev/null 2>&1; then
+        run_as_root journalctl --vacuum-time=7d || printf 'warn: journal cleanup failed\n'
+    fi
+}
+
+prepare_amazon_linux_ec2() {
+    if ! is_amazon_linux; then
+        return
+    fi
+
+    printf 'amazon-linux: EC2 compatibility checks enabled\n'
+
+    if amazon_linux_storage_is_low "$HOME"; then
+        clean_amazon_linux_package_caches
+    fi
+
+    if amazon_linux_storage_is_low "$HOME"; then
+        printf 'warn: low disk space or inode headroom remains; Cargo/Neovim installs may fail\n'
+        df -h "$HOME" 2>/dev/null || true
+        df -ih "$HOME" 2>/dev/null || true
+    fi
+}
+
 install_packages_one_by_one() {
     local manager=$1
     shift
@@ -304,6 +397,92 @@ install_packages_one_by_one() {
             printf 'warn: failed to install package: %s\n' "$package"
         fi
     done
+}
+
+write_managed_block() {
+    local target=$1
+    local begin_marker=$2
+    local end_marker=$3
+    local block=$4
+    local tmp
+
+    mkdir -p "$(dirname "$target")"
+
+    if [ -L "$target" ] && [ ! -e "$target" ]; then
+        mkdir -p "$BACKUP_DIR"
+        mv "$target" "$BACKUP_DIR/"
+        printf 'backup: broken %s symlink -> %s/\n' "$target" "$BACKUP_DIR"
+    fi
+
+    if [ ! -e "$target" ]; then
+        printf '%s\n' "$block" > "$target"
+        printf 'create: %s\n' "$target"
+        return
+    fi
+
+    tmp=$(mktemp)
+
+    if grep -Fq "$begin_marker" "$target"; then
+        awk -v begin="$begin_marker" -v end="$end_marker" '
+            $0 == begin {
+                in_block = 1
+                next
+            }
+            $0 == end {
+                in_block = 0
+                next
+            }
+            !in_block {
+                print
+            }
+        ' "$target" > "$tmp"
+        {
+            printf '\n'
+            printf '%s\n' "$block"
+        } >> "$tmp"
+        mv "$tmp" "$target"
+        printf 'ok: refreshed managed block in %s\n' "$target"
+        return
+    fi
+
+    {
+        cat "$target"
+        printf '\n'
+        printf '%s\n' "$block"
+    } > "$tmp"
+    mv "$tmp" "$target"
+    printf 'update: added managed block to %s\n' "$target"
+}
+
+ensure_bash_setup() {
+    local bashrc="$HOME/.bashrc"
+    local begin_marker="# >>> dotfiles amazon linux bash >>>"
+    local end_marker="# <<< dotfiles amazon linux bash <<<"
+    local path_line="export PATH=\"\$HOME/.local/bin:$DOTFILES_DIR/scripts:\$PATH\""
+    local block
+
+    block=$(printf '%s\n%s\n%s\n' "$begin_marker" "$path_line" "$end_marker")
+    write_managed_block "$bashrc" "$begin_marker" "$end_marker" "$block"
+}
+
+ensure_readline_setup() {
+    local inputrc="$HOME/.inputrc"
+    local begin_marker="# >>> dotfiles amazon linux readline >>>"
+    local end_marker="# <<< dotfiles amazon linux readline <<<"
+    local block
+
+    block=$(cat <<'EOF'
+# >>> dotfiles amazon linux readline >>>
+set editing-mode emacs
+"\e[A": previous-history
+"\e[B": next-history
+"\e[3~": delete-char
+"\C-?": backward-delete-char
+# <<< dotfiles amazon linux readline <<<
+EOF
+)
+
+    write_managed_block "$inputrc" "$begin_marker" "$end_marker" "$block"
 }
 
 ensure_bat_command() {
@@ -566,6 +745,84 @@ install_neovim_linux() {
     rm -rf "$tmpdir"
 }
 
+install_tree_sitter_cli_linux() {
+    local versions
+    local version
+    local installed_version
+    local installed_ok=0
+
+    if [ -n "${DOTFILES_TREE_SITTER_CLI_VERSIONS:-}" ]; then
+        versions="$DOTFILES_TREE_SITTER_CLI_VERSIONS"
+    elif [ -n "${DOTFILES_TREE_SITTER_CLI_VERSION:-}" ]; then
+        versions="$DOTFILES_TREE_SITTER_CLI_VERSION"
+    else
+        versions="0.22.6 0.20.10"
+    fi
+
+    installed_version=$( (tree-sitter --version 2>/dev/null || true) | sed -n 's/^tree-sitter \([^[:space:]]*\).*/\1/p' | head -n 1)
+
+    if [ -n "$installed_version" ] && ! tool_updates_enabled; then
+        printf 'ok: tree-sitter-cli %s installed\n' "$installed_version"
+        return
+    fi
+
+    if ! command -v cargo >/dev/null 2>&1; then
+        printf 'warn: cargo missing; cannot install tree-sitter-cli\n'
+        return
+    fi
+
+    mkdir -p "$HOME/.local"
+
+    for version in $versions; do
+        if [ "$installed_version" = "$version" ]; then
+            printf 'ok: tree-sitter-cli %s current\n' "$version"
+            installed_ok=1
+            break
+        fi
+
+        if cargo install tree-sitter-cli --version "$version" --locked --root "$HOME/.local" --force; then
+            printf 'install: tree-sitter-cli %s -> %s\n' "$version" "$HOME/.local/bin/tree-sitter"
+            installed_ok=1
+            break
+        fi
+
+        printf 'warn: failed to install tree-sitter-cli %s with cargo\n' "$version"
+    done
+
+    if [ "$installed_ok" -eq 0 ]; then
+        printf 'warn: failed to install any compatible tree-sitter-cli version\n'
+        return
+    fi
+
+    hash -r 2>/dev/null || true
+}
+
+ensure_mason_tree_sitter_uses_local_cli() {
+    local cli="$HOME/.local/bin/tree-sitter"
+    local mason_bin="$HOME/.local/share/nvim/mason/bin/tree-sitter"
+    local backup
+
+    if [ ! -x "$cli" ]; then
+        return
+    fi
+
+    mkdir -p "$(dirname "$mason_bin")"
+
+    if [ -L "$mason_bin" ] && [ "$(readlink "$mason_bin")" = "$cli" ]; then
+        printf 'ok: Mason tree-sitter already uses %s\n' "$cli"
+        return
+    fi
+
+    if [ -e "$mason_bin" ] || [ -L "$mason_bin" ]; then
+        backup="$mason_bin.prebuilt-amazon-backup"
+        mv "$mason_bin" "$backup"
+        printf 'backup: %s -> %s\n' "$mason_bin" "$backup"
+    fi
+
+    ln -s "$cli" "$mason_bin"
+    printf 'link: %s -> %s\n' "$mason_bin" "$cli"
+}
+
 install_shell_tool_scripts_linux() {
     mkdir -p "$HOME/.local/bin"
 
@@ -595,11 +852,11 @@ install_macos_packages() {
 install_linux_packages() {
     if command -v apt-get >/dev/null 2>&1; then
         run_as_root apt-get update || printf 'warn: apt update failed; continuing\n'
-        install_packages_one_by_one apt-get git zsh tmux curl ca-certificates unzip tar gzip build-essential nodejs npm jq ripgrep fd-find fzf bat gh eza
+        install_packages_one_by_one apt-get git zsh tmux curl ca-certificates unzip tar gzip build-essential cargo rustc nodejs npm jq ripgrep fd-find fzf bat gh eza
     elif command -v dnf >/dev/null 2>&1; then
-        install_packages_one_by_one dnf git zsh tmux curl ca-certificates unzip tar gzip gcc gcc-c++ make nodejs npm jq ripgrep fd-find fzf bat gh eza
+        install_packages_one_by_one dnf git zsh tmux curl ca-certificates unzip tar gzip gcc gcc-c++ make rust cargo nodejs npm jq ripgrep fd-find fzf bat gh eza
     elif command -v yum >/dev/null 2>&1; then
-        install_packages_one_by_one yum git zsh tmux curl ca-certificates unzip tar gzip gcc gcc-c++ make nodejs npm jq ripgrep fd-find fzf bat gh eza
+        install_packages_one_by_one yum git zsh tmux curl ca-certificates unzip tar gzip gcc gcc-c++ make rust cargo nodejs npm jq ripgrep fd-find fzf bat gh eza
     else
         printf 'warn: supported package manager not found; skipping OS package install\n'
     fi
@@ -608,6 +865,10 @@ install_linux_packages() {
     install_ripgrep_linux
     install_fd_linux
     install_neovim_linux
+    install_tree_sitter_cli_linux
+    if is_amazon_linux; then
+        ensure_mason_tree_sitter_uses_local_cli
+    fi
     install_lazygit_linux
     install_shell_tool_scripts_linux
 }
@@ -717,6 +978,9 @@ main() {
     printf 'dotfiles: %s\n' "$DOTFILES_DIR"
     printf 'detected: %s\n\n' "$os_name"
 
+    prepare_amazon_linux_ec2
+    printf '\n'
+
     update_dotfiles_repo
     printf '\n'
 
@@ -738,15 +1002,20 @@ main() {
 
     case "$os_name" in
         macos|linux|wsl)
+            if is_amazon_linux; then
+                ensure_bash_setup
+                ensure_readline_setup
+            fi
             ensure_zsh_setup
             link_file "$DOTFILES_DIR/.ignore" "$HOME/.ignore"
             link_file "$DOTFILES_DIR/.tmux.conf" "$HOME/.tmux.conf"
             if [ "$os_name" = "macos" ]; then
                 link_macos_configs
+                print_missing zsh tmux lazygit starship zoxide atuin nvim pnpm gh rg fd eza bat jq fzf
             else
                 link_linux_configs
+                print_missing zsh tmux lazygit starship zoxide atuin nvim tree-sitter pnpm gh rg fd eza bat jq fzf
             fi
-            print_missing zsh tmux lazygit starship zoxide atuin nvim pnpm gh rg fd eza bat jq fzf
             ;;
         windows)
             ensure_zsh_setup
@@ -764,4 +1033,6 @@ main() {
     print_package_hint "$os_name"
 }
 
-main "$@"
+if [ "${BASH_SOURCE[0]}" = "$0" ]; then
+    main "$@"
+fi

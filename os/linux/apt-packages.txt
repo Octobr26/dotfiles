@@ -1,5 +1,6 @@
 atuin
 bat
+cargo
 eza
 fd-find
 fzf
@@ -10,6 +11,7 @@ lazygit
 nodejs
 npm
 ripgrep
+rustc
 starship
 tmux
 zoxide
