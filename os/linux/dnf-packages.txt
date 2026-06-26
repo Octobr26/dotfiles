@@ -2,6 +2,7 @@ bat
 ca-certificates
 curl
 eza
+fd-find
 fzf
 gcc
 gcc-c++

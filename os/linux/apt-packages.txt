@@ -1,6 +1,7 @@
 atuin
 bat
 eza
+fd-find
 fzf
 git
 gh

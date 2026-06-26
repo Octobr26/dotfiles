@@ -50,10 +50,10 @@ tool_updates_enabled() {
 managed_tools_for_os() {
     case "$1" in
         macos|linux|wsl)
-            printf '%s\n' git zsh tmux lazygit starship zoxide atuin nvim node npm pnpm gh rg eza bat jq fzf codex claude
+            printf '%s\n' git zsh tmux lazygit starship zoxide atuin nvim node npm pnpm gh rg fd eza bat jq fzf codex claude
             ;;
         windows)
-            printf '%s\n' git node npm pnpm gh lazygit starship zoxide nvim rg eza bat jq fzf codex claude
+            printf '%s\n' git node npm pnpm gh lazygit starship zoxide nvim rg fd eza bat jq fzf codex claude
             ;;
         *)
             printf '%s\n' git zsh node npm codex claude
@@ -152,7 +152,7 @@ print_update_candidates() {
                     printf '  ok: apt packages current\n'
                 fi
             elif command -v dnf >/dev/null 2>&1; then
-                output=$(dnf check-update git zsh tmux nodejs npm jq ripgrep fzf bat gh eza 2>/dev/null || true)
+                output=$(dnf check-update git zsh tmux nodejs npm jq ripgrep fd-find fzf bat gh eza 2>/dev/null || true)
                 if [ -n "$output" ]; then
                     printf '  dnf updates still available for managed packages:\n'
                     print_limited_output "$output" 20
@@ -160,7 +160,7 @@ print_update_candidates() {
                     printf '  ok: dnf managed packages current\n'
                 fi
             elif command -v yum >/dev/null 2>&1; then
-                output=$(yum check-update git zsh tmux nodejs npm jq ripgrep fzf bat gh eza 2>/dev/null || true)
+                output=$(yum check-update git zsh tmux nodejs npm jq ripgrep fd-find fzf bat gh eza 2>/dev/null || true)
                 if [ -n "$output" ]; then
                     printf '  yum updates still available for managed packages:\n'
                     print_limited_output "$output" 20
@@ -318,6 +318,139 @@ ensure_bat_command() {
     fi
 }
 
+ensure_fd_command() {
+    if command -v fd >/dev/null 2>&1; then
+        return
+    fi
+
+    if command -v fdfind >/dev/null 2>&1; then
+        mkdir -p "$HOME/.local/bin"
+        ln -sf "$(command -v fdfind)" "$HOME/.local/bin/fd"
+        printf 'link: %s -> %s\n' "$HOME/.local/bin/fd" "$(command -v fdfind)"
+    fi
+}
+
+linux_release_target() {
+    local tool=$1
+
+    case "$(uname -m)" in
+        x86_64|amd64)
+            case "$tool" in
+                ripgrep)
+                    echo "x86_64-unknown-linux-musl"
+                    ;;
+                *)
+                    echo "x86_64-unknown-linux-gnu"
+                    ;;
+            esac
+            ;;
+        aarch64|arm64)
+            echo "aarch64-unknown-linux-gnu"
+            ;;
+        *)
+            return 1
+            ;;
+    esac
+}
+
+install_ripgrep_linux() {
+    if command -v rg >/dev/null 2>&1 && ! tool_updates_enabled; then
+        return
+    fi
+
+    if ! command -v curl >/dev/null 2>&1 || ! command -v tar >/dev/null 2>&1; then
+        printf 'warn: curl/tar missing; cannot install ripgrep release archive\n'
+        return
+    fi
+
+    local target
+    if ! target=$(linux_release_target ripgrep); then
+        printf 'warn: unsupported architecture for ripgrep install: %s\n' "$(uname -m)"
+        return
+    fi
+
+    local version
+    version=$( (curl -fsSL https://api.github.com/repos/BurntSushi/ripgrep/releases/latest || true) | sed -n 's/.*"tag_name": *"\([^"]*\)".*/\1/p' | head -n 1)
+
+    if [ -z "$version" ]; then
+        printf 'warn: could not determine latest ripgrep version\n'
+        return
+    fi
+
+    local installed_version
+    installed_version=$( (rg --version 2>/dev/null || true) | sed -n 's/^ripgrep \([^[:space:]]*\).*/\1/p' | head -n 1)
+
+    if [ "$installed_version" = "$version" ]; then
+        printf 'ok: ripgrep %s current\n' "$version"
+        return
+    fi
+
+    local asset="ripgrep-${version}-${target}"
+    local tmpdir
+    tmpdir=$(mktemp -d)
+    mkdir -p "$HOME/.local/bin"
+
+    if curl -fsSL "https://github.com/BurntSushi/ripgrep/releases/download/${version}/${asset}.tar.gz" -o "$tmpdir/rg.tar.gz" &&
+        tar -xzf "$tmpdir/rg.tar.gz" -C "$tmpdir"; then
+        install -m 0755 "$tmpdir/$asset/rg" "$HOME/.local/bin/rg"
+        printf 'install: ripgrep %s -> %s\n' "$version" "$HOME/.local/bin/rg"
+    else
+        printf 'warn: failed to install ripgrep release archive\n'
+    fi
+
+    rm -rf "$tmpdir"
+}
+
+install_fd_linux() {
+    ensure_fd_command
+
+    if command -v fd >/dev/null 2>&1 && ! tool_updates_enabled; then
+        return
+    fi
+
+    if ! command -v curl >/dev/null 2>&1 || ! command -v tar >/dev/null 2>&1; then
+        printf 'warn: curl/tar missing; cannot install fd release archive\n'
+        return
+    fi
+
+    local target
+    if ! target=$(linux_release_target fd); then
+        printf 'warn: unsupported architecture for fd install: %s\n' "$(uname -m)"
+        return
+    fi
+
+    local version
+    version=$( (curl -fsSL https://api.github.com/repos/sharkdp/fd/releases/latest || true) | sed -n 's/.*"tag_name": *"v\([^"]*\)".*/\1/p' | head -n 1)
+
+    if [ -z "$version" ]; then
+        printf 'warn: could not determine latest fd version\n'
+        return
+    fi
+
+    local installed_version
+    installed_version=$( (fd --version 2>/dev/null || true) | sed -n 's/^fd \([^[:space:]]*\).*/\1/p' | head -n 1)
+
+    if [ "$installed_version" = "$version" ]; then
+        printf 'ok: fd %s current\n' "$version"
+        return
+    fi
+
+    local asset="fd-v${version}-${target}"
+    local tmpdir
+    tmpdir=$(mktemp -d)
+    mkdir -p "$HOME/.local/bin"
+
+    if curl -fsSL "https://github.com/sharkdp/fd/releases/download/v${version}/${asset}.tar.gz" -o "$tmpdir/fd.tar.gz" &&
+        tar -xzf "$tmpdir/fd.tar.gz" -C "$tmpdir"; then
+        install -m 0755 "$tmpdir/$asset/fd" "$HOME/.local/bin/fd"
+        printf 'install: fd %s -> %s\n' "$version" "$HOME/.local/bin/fd"
+    else
+        printf 'warn: failed to install fd release archive\n'
+    fi
+
+    rm -rf "$tmpdir"
+}
+
 install_lazygit_linux() {
     if command -v lazygit >/dev/null 2>&1 && ! tool_updates_enabled; then
         return
@@ -462,16 +595,18 @@ install_macos_packages() {
 install_linux_packages() {
     if command -v apt-get >/dev/null 2>&1; then
         run_as_root apt-get update || printf 'warn: apt update failed; continuing\n'
-        install_packages_one_by_one apt-get git zsh tmux curl ca-certificates unzip tar gzip build-essential nodejs npm jq ripgrep fzf bat gh eza
+        install_packages_one_by_one apt-get git zsh tmux curl ca-certificates unzip tar gzip build-essential nodejs npm jq ripgrep fd-find fzf bat gh eza
     elif command -v dnf >/dev/null 2>&1; then
-        install_packages_one_by_one dnf git zsh tmux curl ca-certificates unzip tar gzip gcc gcc-c++ make nodejs npm jq ripgrep fzf bat gh eza
+        install_packages_one_by_one dnf git zsh tmux curl ca-certificates unzip tar gzip gcc gcc-c++ make nodejs npm jq ripgrep fd-find fzf bat gh eza
     elif command -v yum >/dev/null 2>&1; then
-        install_packages_one_by_one yum git zsh tmux curl ca-certificates unzip tar gzip gcc gcc-c++ make nodejs npm jq ripgrep fzf bat gh eza
+        install_packages_one_by_one yum git zsh tmux curl ca-certificates unzip tar gzip gcc gcc-c++ make nodejs npm jq ripgrep fd-find fzf bat gh eza
     else
         printf 'warn: supported package manager not found; skipping OS package install\n'
     fi
 
     ensure_bat_command
+    install_ripgrep_linux
+    install_fd_linux
     install_neovim_linux
     install_lazygit_linux
     install_shell_tool_scripts_linux
@@ -483,9 +618,11 @@ install_node_clis() {
         return
     fi
 
+    local pnpm_spec="${DOTFILES_PNPM_SPEC:-pnpm@10}"
+
     mkdir -p "$HOME/.local"
     npm config set prefix "$HOME/.local" >/dev/null 2>&1 || printf 'warn: failed to set npm prefix\n'
-    npm install -g pnpm@latest @openai/codex@latest @anthropic-ai/claude-code@latest || printf 'warn: failed to install pnpm/Codex/Claude CLIs\n'
+    npm install -g "$pnpm_spec" @openai/codex@latest @anthropic-ai/claude-code@latest || printf 'warn: failed to install pnpm/Codex/Claude CLIs\n'
 }
 
 install_packages_for_os() {
@@ -609,13 +746,13 @@ main() {
             else
                 link_linux_configs
             fi
-            print_missing zsh tmux lazygit starship zoxide atuin nvim pnpm gh rg eza bat jq fzf
+            print_missing zsh tmux lazygit starship zoxide atuin nvim pnpm gh rg fd eza bat jq fzf
             ;;
         windows)
             ensure_zsh_setup
             link_file "$DOTFILES_DIR/.ignore" "$HOME/.ignore"
             link_windows_configs
-            print_missing git gh lazygit starship zoxide nvim rg eza bat jq fzf
+            print_missing git gh lazygit starship zoxide nvim rg fd eza bat jq fzf
             ;;
         *)
             ensure_zsh_setup

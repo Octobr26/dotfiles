@@ -3,6 +3,7 @@ GitHub.cli
 ajeetdsouza.zoxide
 BurntSushi.ripgrep.MSVC
 eza-community.eza
+sharkdp.fd
 JesseDuffield.lazygit
 jqlang.jq
 junegunn.fzf

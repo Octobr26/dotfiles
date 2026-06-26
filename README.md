@@ -33,8 +33,10 @@ The installer detects `macos`, `linux`, `wsl`, or `windows`.
 - macOS uses `brew bundle`
 - Linux/WSL uses `apt-get`, `dnf`, or `yum`; this covers Amazon Linux on EC2 through `dnf`/`yum`
 - Linux installs or updates Neovim from the official release archive under `~/.local/opt`, avoiding older distro packages
+- Linux installs or updates ripgrep (`rg`) and fd from official release archives when distro packages are missing or stale
 - Linux also installs or updates lazygit, starship, zoxide, and Atuin through upstream install scripts/releases when packages are not available
 - pnpm, Codex, and Claude CLIs install/update through npm into `$HOME/.local`
+- pnpm defaults to `pnpm@10` to avoid `pnpm@11` requiring Node `>=22.13`; override with `DOTFILES_PNPM_SPEC=pnpm@latest`
 - after package work, it reports any remaining Homebrew, Linux package-manager, or npm global updates it can see
 - links `.ignore` to `~/.ignore`
 - macOS/Linux/WSL: links `.tmux.conf`
