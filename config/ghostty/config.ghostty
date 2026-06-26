@@ -1,0 +1,10 @@
+theme = Catppuccin Mocha
+font-size = 19
+background-opacity = 1.0
+background-blur = 20
+mouse-hide-while-typing = true
+window-decoration = auto
+macos-option-as-alt = true
+font-family = "JetBrainsMono Nerd Font"
+window-padding-x = 12
+window-padding-y = 10

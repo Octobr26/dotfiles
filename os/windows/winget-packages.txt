@@ -1,7 +1,12 @@
 Git.Git
 GitHub.cli
 ajeetdsouza.zoxide
+BurntSushi.ripgrep.MSVC
+eza-community.eza
 JesseDuffield.lazygit
+jqlang.jq
+junegunn.fzf
 Neovim.Neovim
 OpenJS.NodeJS
+sharkdp.bat
 Starship.Starship

@@ -34,6 +34,8 @@ link_file() {
         return
     fi
 
+    mkdir -p "$(dirname "$target")"
+
     if [ -e "$target" ] || [ -L "$target" ]; then
         mkdir -p "$BACKUP_DIR"
         mv "$target" "$BACKUP_DIR/"
@@ -43,9 +45,41 @@ link_file() {
     if ln -s "$source" "$target" 2>/dev/null; then
         printf 'link: %s -> %s\n' "$target" "$source"
     else
-        cp "$source" "$target"
+        if [ -d "$source" ]; then
+            cp -R "$source" "$target"
+        else
+            cp "$source" "$target"
+        fi
         printf 'copy: %s -> %s (symlink unavailable)\n' "$source" "$target"
     fi
+}
+
+link_common_configs() {
+    link_file "$DOTFILES_DIR/config/nvim" "$HOME/.config/nvim"
+    link_file "$DOTFILES_DIR/config/atuin" "$HOME/.config/atuin"
+    link_file "$DOTFILES_DIR/config/git/ignore" "$HOME/.config/git/ignore"
+}
+
+link_macos_configs() {
+    link_common_configs
+    link_file "$DOTFILES_DIR/config/ghostty/config.ghostty" "$HOME/Library/Application Support/com.mitchellh.ghostty/config.ghostty"
+    link_file "$DOTFILES_DIR/config/lazygit/config.yml" "$HOME/Library/Application Support/lazygit/config.yml"
+}
+
+link_linux_configs() {
+    link_common_configs
+    link_file "$DOTFILES_DIR/config/ghostty/config.ghostty" "$HOME/.config/ghostty/config"
+    link_file "$DOTFILES_DIR/config/lazygit/config.yml" "$HOME/.config/lazygit/config.yml"
+}
+
+link_windows_configs() {
+    local local_app_data="${LOCALAPPDATA:-$HOME/AppData/Local}"
+    local roaming_app_data="${APPDATA:-$HOME/AppData/Roaming}"
+
+    link_file "$DOTFILES_DIR/config/atuin" "$HOME/.config/atuin"
+    link_file "$DOTFILES_DIR/config/git/ignore" "$HOME/.config/git/ignore"
+    link_file "$DOTFILES_DIR/config/nvim" "$local_app_data/nvim"
+    link_file "$DOTFILES_DIR/config/lazygit/config.yml" "$roaming_app_data/lazygit/config.yml"
 }
 
 print_missing() {
@@ -125,11 +159,17 @@ main() {
         macos|linux|wsl)
             ensure_zsh_source
             link_file "$DOTFILES_DIR/.tmux.conf" "$HOME/.tmux.conf"
-            print_missing zsh tmux lazygit starship zoxide atuin nvim pnpm gh rg
+            if [ "$os_name" = "macos" ]; then
+                link_macos_configs
+            else
+                link_linux_configs
+            fi
+            print_missing zsh tmux lazygit starship zoxide atuin nvim pnpm gh rg eza bat jq fzf
             ;;
         windows)
             ensure_zsh_source
-            print_missing git gh lazygit starship zoxide nvim
+            link_windows_configs
+            print_missing git gh lazygit starship zoxide nvim rg eza bat jq fzf
             ;;
         *)
             ensure_zsh_source

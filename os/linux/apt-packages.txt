@@ -1,7 +1,10 @@
 atuin
+bat
+eza
 fzf
 git
 gh
+jq
 lazygit
 neovim
 nodejs

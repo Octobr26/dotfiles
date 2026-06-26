@@ -11,3 +11,8 @@ secrets/
 *.pem
 *.p12
 *.mobileprovision
+config/lazygit/state.yml
+config/atuin/history.db
+config/atuin/key
+config/atuin/session
+config/atuin/*.db
