@@ -1,0 +1,13 @@
+.DS_Store
+*.log
+.env
+.env.*
+!.env.example
+node_modules/
+tmp/
+temp/
+secrets/
+*.key
+*.pem
+*.p12
+*.mobileprovision

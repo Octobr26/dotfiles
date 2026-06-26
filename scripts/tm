@@ -1,0 +1,201 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+usage() {
+    echo "Usage: $(basename "$0") frontend|front|intelli|onegate|<relative-or-absolute-path>"
+    exit 1
+}
+
+session_exists() {
+    local session_name=$1
+    tmux has-session -t "=$session_name" 2>/dev/null
+}
+
+attach_or_switch() {
+    local session_name=$1
+
+    if [ -n "${TMUX:-}" ]; then
+        tmux switch-client -t "=$session_name"
+    else
+        tmux attach-session -t "=$session_name"
+    fi
+}
+
+safe_session_name_from_path() {
+    local path=$1
+    local base
+
+    base=$(basename "$path")
+    base=$(printf '%s' "$base" | tr -c 'A-Za-z0-9_.-' '_')
+
+    if [ -z "$base" ]; then
+        echo "project"
+    else
+        echo "$base"
+    fi
+}
+
+create_ai_window() {
+    local session_name=$1
+    local project_dir=$2
+
+    tmux new-window -t "$session_name" -n ai -c "$project_dir"
+    tmux split-window -v -t "$session_name:ai.0" -c "$project_dir"
+    tmux send-keys -t "$session_name:ai.0" 'claude' C-m
+    tmux send-keys -t "$session_name:ai.1" 'codex' C-m
+    tmux select-pane -t "$session_name:ai.0"
+}
+
+create_frontend_session() {
+    local session_name="frontend"
+    local project_dir="${TM_FRONTEND_DIR:-$HOME/work/dayjob/CVO-Infinity}"
+
+    if [ ! -d "$project_dir" ]; then
+        echo "Directory does not exist: $project_dir"
+        echo "Create it, symlink it, or set TM_FRONTEND_DIR to the frontend project path."
+        exit 1
+    fi
+
+    if ! session_exists "$session_name"; then
+        tmux new-session -d -s "$session_name" -n server -c "$project_dir"
+        tmux send-keys -t "$session_name:server" 'pnpm dev' C-m
+
+        tmux new-window -t "$session_name" -n git -c "$project_dir"
+        tmux send-keys -t "$session_name:git" 'lg' C-m
+
+        tmux new-window -t "$session_name" -n code -c "$project_dir"
+        tmux send-keys -t "$session_name:code" 'nvim' C-m
+
+        create_ai_window "$session_name" "$project_dir"
+
+        tmux select-window -t "$session_name:git"
+    fi
+
+    attach_or_switch "$session_name"
+}
+
+create_intelli_session() {
+    local session_name="intelli"
+    local project_dir="${TM_INTELLI_DIR:-$HOME/work/dayjob/Intellimind}"
+    local frontend_dir="$project_dir/frontend"
+
+    if [ ! -d "$project_dir" ]; then
+        echo "Directory does not exist: $project_dir"
+        echo "Create it, symlink it, or set TM_INTELLI_DIR to the Intellimind repo path."
+        exit 1
+    fi
+
+    if [ ! -d "$frontend_dir" ]; then
+        echo "Directory does not exist: $frontend_dir"
+        exit 1
+    fi
+
+    if ! session_exists "$session_name"; then
+        tmux new-session -d -s "$session_name" -n server -c "$frontend_dir"
+        tmux send-keys -t "$session_name:server" 'npm start' C-m
+
+        tmux new-window -t "$session_name" -n git -c "$project_dir"
+        tmux send-keys -t "$session_name:git" 'lg' C-m
+
+        tmux new-window -t "$session_name" -n code -c "$project_dir"
+        tmux send-keys -t "$session_name:code" 'nvim' C-m
+
+        create_ai_window "$session_name" "$project_dir"
+
+        tmux select-window -t "$session_name:git"
+    fi
+
+    attach_or_switch "$session_name"
+}
+
+create_onegate_session() {
+    local session_name="onegate"
+    local project_dir="${TM_ONEGATE_DIR:-$HOME/work/dayjob/onegate_portal}"
+    local frontend_dir="$project_dir/frontend"
+
+    if [ ! -d "$project_dir" ]; then
+        echo "Directory does not exist: $project_dir"
+        echo "Create it, symlink it, or set TM_ONEGATE_DIR to the OneGate repo path."
+        exit 1
+    fi
+
+    if [ ! -d "$frontend_dir" ]; then
+        echo "Directory does not exist: $frontend_dir"
+        exit 1
+    fi
+
+    if ! session_exists "$session_name"; then
+        tmux new-session -d -s "$session_name" -n server -c "$frontend_dir"
+        tmux send-keys -t "$session_name:server" 'pnpm dev' C-m
+
+        tmux new-window -t "$session_name" -n git -c "$project_dir"
+        tmux send-keys -t "$session_name:git" 'lg' C-m
+
+        tmux new-window -t "$session_name" -n code -c "$project_dir"
+        tmux send-keys -t "$session_name:code" 'nvim' C-m
+
+        create_ai_window "$session_name" "$project_dir"
+
+        tmux select-window -t "$session_name:git"
+    fi
+
+    attach_or_switch "$session_name"
+}
+
+create_project_session() {
+    local target=$1
+    local target_dir
+    local quoted_target_dir
+    local session_name
+
+    if [ ! -d "$target" ]; then
+        echo "Directory does not exist: $target"
+        exit 1
+    fi
+
+    target_dir=$(realpath "$target")
+    quoted_target_dir=$(printf '%q' "$target_dir")
+    session_name=$(safe_session_name_from_path "$target_dir")
+
+    if ! session_exists "$session_name"; then
+        tmux new-session -d -s "$session_name" -n git -c "$target_dir"
+        tmux send-keys -t "$session_name:git" "cd $quoted_target_dir && lg" C-m
+
+        tmux new-window -t "$session_name" -n code -c "$target_dir"
+        tmux send-keys -t "$session_name:code" 'nvim' C-m
+
+        tmux new-window -t "$session_name" -n shell -c "$target_dir"
+        tmux send-keys -t "$session_name:shell" "cd $quoted_target_dir && clear" C-m
+
+        create_ai_window "$session_name" "$target_dir"
+
+        tmux select-window -t "$session_name:git"
+    fi
+
+    attach_or_switch "$session_name"
+}
+
+if ! command -v tmux >/dev/null 2>&1; then
+    echo "tmux is not installed or not in PATH"
+    exit 1
+fi
+
+target=${1:-}
+
+case "$target" in
+    "")
+        usage
+        ;;
+    frontend|front)
+        create_frontend_session
+        ;;
+    intelli)
+        create_intelli_session
+        ;;
+    onegate)
+        create_onegate_session
+        ;;
+    *)
+        create_project_session "$target"
+        ;;
+esac
