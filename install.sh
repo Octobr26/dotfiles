@@ -85,6 +85,12 @@ print_package_hint() {
     esac
 }
 
+print_zsh_hint() {
+    printf '\nManual zsh setup:\n'
+    printf '  Add this line to ~/.zshrc:\n'
+    printf '  source "$HOME/dev/dotfiles/zsh_stuff"\n'
+}
+
 main() {
     local os_name
     os_name=$(detect_os)
@@ -94,23 +100,18 @@ main() {
 
     case "$os_name" in
         macos|linux|wsl)
-            link_file "$DOTFILES_DIR/.zshrc" "$HOME/.zshrc"
-            link_file "$DOTFILES_DIR/.zprofile" "$HOME/.zprofile"
             link_file "$DOTFILES_DIR/.tmux.conf" "$HOME/.tmux.conf"
             print_missing zsh tmux lazygit starship zoxide atuin nvim pnpm gh rg
             ;;
         windows)
-            link_file "$DOTFILES_DIR/.zshrc" "$HOME/.zshrc"
-            link_file "$DOTFILES_DIR/.zprofile" "$HOME/.zprofile"
             print_missing git gh lazygit starship zoxide nvim
             ;;
         *)
-            link_file "$DOTFILES_DIR/.zshrc" "$HOME/.zshrc"
-            link_file "$DOTFILES_DIR/.zprofile" "$HOME/.zprofile"
             print_missing zsh git gh
             ;;
     esac
 
+    print_zsh_hint
     print_package_hint "$os_name"
 }
 
