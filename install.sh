@@ -3,6 +3,7 @@ set -euo pipefail
 
 DOTFILES_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 BACKUP_DIR="$HOME/.dotfiles-backup/$(date +%Y%m%d-%H%M%S)"
+export PATH="$HOME/.local/bin:$DOTFILES_DIR/scripts:$PATH"
 
 update_dotfiles_repo() {
     if ! command -v git >/dev/null 2>&1; then
@@ -40,6 +41,152 @@ detect_os() {
             echo "unknown"
             ;;
     esac
+}
+
+tool_updates_enabled() {
+    [ "${DOTFILES_UPDATE_TOOLS:-1}" != "0" ]
+}
+
+managed_tools_for_os() {
+    case "$1" in
+        macos|linux|wsl)
+            printf '%s\n' git zsh tmux lazygit starship zoxide atuin nvim node npm pnpm gh rg eza bat jq fzf codex claude
+            ;;
+        windows)
+            printf '%s\n' git node npm pnpm gh lazygit starship zoxide nvim rg eza bat jq fzf codex claude
+            ;;
+        *)
+            printf '%s\n' git zsh node npm codex claude
+            ;;
+    esac
+}
+
+tool_version() {
+    local tool=$1
+    local output=""
+
+    case "$tool" in
+        zsh)
+            output=$(zsh --version 2>/dev/null || true)
+            ;;
+        tmux)
+            output=$(tmux -V 2>/dev/null || true)
+            ;;
+        nvim)
+            output=$(nvim --version 2>/dev/null || true)
+            ;;
+        eza)
+            output=$(eza --version 2>/dev/null | sed -n '2p' || true)
+            ;;
+        *)
+            output=$("$tool" --version 2>/dev/null || true)
+            ;;
+    esac
+
+    printf '%s\n' "$output" | sed -n '1p'
+}
+
+print_tool_status() {
+    local label=$1
+    local os_name=$2
+    local location
+    local tool
+    local version
+
+    printf '%s tool check:\n' "$label"
+
+    for tool in $(managed_tools_for_os "$os_name"); do
+        if location=$(command -v "$tool" 2>/dev/null); then
+            version=$(tool_version "$tool")
+            if [ -n "$version" ]; then
+                printf '  ok: %-9s %s (%s)\n' "$tool" "$version" "$location"
+            else
+                printf '  ok: %-9s installed (%s)\n' "$tool" "$location"
+            fi
+        else
+            printf '  missing: %s\n' "$tool"
+        fi
+    done
+}
+
+print_limited_output() {
+    local output=$1
+    local limit=${2:-20}
+    local total
+
+    total=$(printf '%s\n' "$output" | sed '/^[[:space:]]*$/d' | wc -l | tr -d ' ')
+    printf '%s\n' "$output" | sed -n "1,${limit}p"
+
+    if [ "$total" -gt "$limit" ]; then
+        printf '  ... %s more\n' "$((total - limit))"
+    fi
+}
+
+print_update_candidates() {
+    local os_name=$1
+    local output
+
+    printf 'Update check:\n'
+
+    case "$os_name" in
+        macos)
+            if command -v brew >/dev/null 2>&1; then
+                output=$(brew outdated --formula --cask 2>/dev/null || true)
+                if [ -n "$output" ]; then
+                    printf '  Homebrew updates still available:\n'
+                    print_limited_output "$output" 20
+                else
+                    printf '  ok: Homebrew packages current\n'
+                fi
+            else
+                printf '  skip: Homebrew not installed\n'
+            fi
+            ;;
+        linux|wsl)
+            if command -v apt >/dev/null 2>&1; then
+                output=$(apt list --upgradable 2>/dev/null | sed '1d' || true)
+                if [ -n "$output" ]; then
+                    printf '  apt packages still upgradable:\n'
+                    print_limited_output "$output" 20
+                else
+                    printf '  ok: apt packages current\n'
+                fi
+            elif command -v dnf >/dev/null 2>&1; then
+                output=$(dnf check-update git zsh tmux nodejs npm jq ripgrep fzf bat neovim gh eza 2>/dev/null || true)
+                if [ -n "$output" ]; then
+                    printf '  dnf updates still available for managed packages:\n'
+                    print_limited_output "$output" 20
+                else
+                    printf '  ok: dnf managed packages current\n'
+                fi
+            elif command -v yum >/dev/null 2>&1; then
+                output=$(yum check-update git zsh tmux nodejs npm jq ripgrep fzf bat neovim gh eza 2>/dev/null || true)
+                if [ -n "$output" ]; then
+                    printf '  yum updates still available for managed packages:\n'
+                    print_limited_output "$output" 20
+                else
+                    printf '  ok: yum managed packages current\n'
+                fi
+            else
+                printf '  skip: supported package manager not found\n'
+            fi
+            ;;
+        *)
+            printf '  skip: OS package update check unavailable for %s\n' "$os_name"
+            ;;
+    esac
+
+    if command -v npm >/dev/null 2>&1; then
+        output=$(npm outdated -g --depth=0 2>/dev/null || true)
+        if [ -n "$output" ]; then
+            printf '  npm global updates still available:\n'
+            print_limited_output "$output" 20
+        else
+            printf '  ok: npm global packages current\n'
+        fi
+    else
+        printf '  skip: npm not installed\n'
+    fi
 }
 
 link_file() {
@@ -172,7 +319,7 @@ ensure_bat_command() {
 }
 
 install_lazygit_linux() {
-    if command -v lazygit >/dev/null 2>&1; then
+    if command -v lazygit >/dev/null 2>&1 && ! tool_updates_enabled; then
         return
     fi
 
@@ -203,6 +350,14 @@ install_lazygit_linux() {
         return
     fi
 
+    local installed_version
+    installed_version=$( (lazygit --version 2>/dev/null || true) | sed -n 's/.*version=\([^,]*\).*/\1/p' | head -n 1)
+
+    if [ "$installed_version" = "$version" ]; then
+        printf 'ok: lazygit %s current\n' "$version"
+        return
+    fi
+
     local tmpdir
     tmpdir=$(mktemp -d)
     mkdir -p "$HOME/.local/bin"
@@ -221,15 +376,15 @@ install_lazygit_linux() {
 install_shell_tool_scripts_linux() {
     mkdir -p "$HOME/.local/bin"
 
-    if ! command -v starship >/dev/null 2>&1 && command -v curl >/dev/null 2>&1; then
+    if command -v curl >/dev/null 2>&1 && { ! command -v starship >/dev/null 2>&1 || tool_updates_enabled; }; then
         curl -fsSL https://starship.rs/install.sh | sh -s -- -y -b "$HOME/.local/bin" || printf 'warn: failed to install starship\n'
     fi
 
-    if ! command -v zoxide >/dev/null 2>&1 && command -v curl >/dev/null 2>&1; then
+    if command -v curl >/dev/null 2>&1 && { ! command -v zoxide >/dev/null 2>&1 || tool_updates_enabled; }; then
         curl -fsSL https://raw.githubusercontent.com/ajeetdsouza/zoxide/main/install.sh | sh || printf 'warn: failed to install zoxide\n'
     fi
 
-    if ! command -v atuin >/dev/null 2>&1 && command -v curl >/dev/null 2>&1; then
+    if command -v curl >/dev/null 2>&1 && { ! command -v atuin >/dev/null 2>&1 || tool_updates_enabled; }; then
         curl --proto '=https' --tlsv1.2 -fsSL https://setup.atuin.sh | sh || printf 'warn: failed to install atuin\n'
     fi
 }
@@ -247,11 +402,11 @@ install_macos_packages() {
 install_linux_packages() {
     if command -v apt-get >/dev/null 2>&1; then
         run_as_root apt-get update || printf 'warn: apt update failed; continuing\n'
-        install_packages_one_by_one apt-get git zsh tmux curl ca-certificates unzip tar gzip build-essential nodejs npm jq ripgrep fzf bat neovim
+        install_packages_one_by_one apt-get git zsh tmux curl ca-certificates unzip tar gzip build-essential nodejs npm jq ripgrep fzf bat neovim gh eza
     elif command -v dnf >/dev/null 2>&1; then
-        install_packages_one_by_one dnf git zsh tmux curl ca-certificates unzip tar gzip gcc gcc-c++ make nodejs npm jq ripgrep fzf bat neovim
+        install_packages_one_by_one dnf git zsh tmux curl ca-certificates unzip tar gzip gcc gcc-c++ make nodejs npm jq ripgrep fzf bat neovim gh eza
     elif command -v yum >/dev/null 2>&1; then
-        install_packages_one_by_one yum git zsh tmux curl ca-certificates unzip tar gzip gcc gcc-c++ make nodejs npm jq ripgrep fzf bat neovim
+        install_packages_one_by_one yum git zsh tmux curl ca-certificates unzip tar gzip gcc gcc-c++ make nodejs npm jq ripgrep fzf bat neovim gh eza
     else
         printf 'warn: supported package manager not found; skipping OS package install\n'
     fi
@@ -269,7 +424,7 @@ install_node_clis() {
 
     mkdir -p "$HOME/.local"
     npm config set prefix "$HOME/.local" >/dev/null 2>&1 || printf 'warn: failed to set npm prefix\n'
-    npm install -g @openai/codex@latest @anthropic-ai/claude-code@latest || printf 'warn: failed to install Codex/Claude CLIs\n'
+    npm install -g pnpm@latest @openai/codex@latest @anthropic-ai/claude-code@latest || printf 'warn: failed to install pnpm/Codex/Claude CLIs\n'
 }
 
 install_packages_for_os() {
@@ -366,7 +521,21 @@ main() {
 
     update_dotfiles_repo
     printf '\n'
+
+    print_tool_status "Before install/update" "$os_name"
+    printf '\n'
+
     install_packages_for_os "$os_name"
+    printf '\n'
+
+    if [ "${DOTFILES_SKIP_PACKAGES:-0}" = "1" ]; then
+        printf 'skip: package update check disabled by DOTFILES_SKIP_PACKAGES=1\n'
+    else
+        print_update_candidates "$os_name"
+    fi
+    printf '\n'
+
+    print_tool_status "After install/update" "$os_name"
     printf '\n'
 
     case "$os_name" in

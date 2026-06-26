@@ -1,9 +1,11 @@
 bat
 ca-certificates
 curl
+eza
 fzf
 gcc
 gcc-c++
+gh
 git
 gzip
 jq
