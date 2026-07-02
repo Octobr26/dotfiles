@@ -2,7 +2,7 @@
 set -euo pipefail
 
 usage() {
-    echo "Usage: $(basename "$0") frontend|front|intelli|onegate|<relative-or-absolute-path>"
+    echo "Usage: $(basename "$0") frontend|front|intelli|onegate|walnut|<relative-or-absolute-path>"
     exit 1
 }
 
@@ -142,6 +142,34 @@ create_onegate_session() {
     attach_or_switch "$session_name"
 }
 
+create_walnut_session() {
+    local session_name="walnut"
+    local project_dir="${TM_WALNUT_DIR:-$HOME/learning/walnut}"
+
+    if [ ! -d "$project_dir" ]; then
+        echo "Directory does not exist: $project_dir"
+        echo "Create it, symlink it, or set TM_WALNUT_DIR to the Walnut repo path."
+        exit 1
+    fi
+
+    if ! session_exists "$session_name"; then
+        tmux new-session -d -s "$session_name" -n shell -c "$project_dir"
+        tmux send-keys -t "$session_name:shell" 'clear' C-m
+
+        tmux new-window -t "$session_name" -n git -c "$project_dir"
+        tmux send-keys -t "$session_name:git" 'lg' C-m
+
+        tmux new-window -t "$session_name" -n code -c "$project_dir"
+        tmux send-keys -t "$session_name:code" 'nvim' C-m
+
+        create_ai_window "$session_name" "$project_dir"
+
+        tmux select-window -t "$session_name:shell"
+    fi
+
+    attach_or_switch "$session_name"
+}
+
 create_project_session() {
     local target=$1
     local target_dir
@@ -194,6 +222,9 @@ case "$target" in
         ;;
     onegate)
         create_onegate_session
+        ;;
+    walnut)
+        create_walnut_session
         ;;
     *)
         create_project_session "$target"

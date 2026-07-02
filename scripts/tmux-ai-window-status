@@ -1,0 +1,47 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+window_target=${1:?window target required}
+window_index=${2:-}
+window_name=${3:-ai}
+
+state="done"
+indicator="✓"
+
+while IFS=$'\t' read -r pane_id pane_title; do
+    for spinner in ⠋ ⠙ ⠹ ⠸ ⠼ ⠴ ⠦ ⠧ ⠇ ⠏; do
+        case "$pane_title" in
+            "$spinner"*)
+                state="running"
+                indicator="●"
+                break
+                ;;
+        esac
+    done
+
+    [ "$state" = "running" ] && break
+
+    pane_text=$(tmux capture-pane -p -t "$pane_id" -S -18 2>/dev/null || true)
+    recent_text=$(printf '%s\n' "$pane_text" | tail -n 14)
+
+    if printf '%s\n' "$recent_text" | grep -Eiq 'Would you like to run|Do you want to allow|Press enter to confirm|permission|approval'; then
+        state="running"
+        indicator="●"
+        break
+    fi
+
+    if ! printf '%s\n' "$recent_text" | grep -Eq '^[[:space:]]*[›❯]'; then
+        state="running"
+        indicator="●"
+        break
+    fi
+done < <(tmux list-panes -t "$window_target" -F '#{pane_id}	#{pane_title}' 2>/dev/null || true)
+
+case "$state" in
+    running)
+        printf '#[fg=#1e1e2e,bg=#f9e2af,bold] %s %s %s ' "$indicator" "$window_index" "$window_name"
+        ;;
+    *)
+        printf '#[fg=#1e1e2e,bg=#a6e3a1,bold] %s %s %s ' "$indicator" "$window_index" "$window_name"
+        ;;
+esac
