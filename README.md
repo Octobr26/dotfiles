@@ -5,6 +5,8 @@ Personal shell and terminal setup.
 ## Includes
 
 - `zsh_stuff`
+- `AGENTS.md`
+- `CLAUDE.md`
 - `.ignore`
 - `.tmux.conf`
 - `config/nvim`
@@ -15,6 +17,10 @@ Personal shell and terminal setup.
 - `scripts/tm`
 - `install.sh`
 - OS package hints under `os/`
+
+## AI Agent Notes
+
+`AGENTS.md` is the shared map for Codex and other agents. `CLAUDE.md` exists only as Claude's entry point and points back to `AGENTS.md`, so repo guidance stays in one place.
 
 ## Install
 
