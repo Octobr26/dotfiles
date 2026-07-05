@@ -16,6 +16,8 @@ Personal shell and terminal setup.
 - `config/lazygit/config.yml`
 - `scripts/tm`
 - `install.sh`
+- `setup`
+- `setup-luis`
 - OS package hints under `os/`
 
 ## AI Agent Notes
@@ -27,14 +29,18 @@ Personal shell and terminal setup.
 ```sh
 git clone https://github.com/Octobr26/dotfiles.git ~/dev/dotfiles
 cd ~/dev/dotfiles
-./install.sh
+./setup
 ```
+
+Use `./setup` for general/shared machines. Use `./setup-luis` for Luis' personal setup.
 
 The installer detects `macos`, `linux`, `wsl`, or `windows`.
 
 - first, it runs `git pull --ff-only` in the dotfiles repo so setup uses the latest checkout when possible
 - prints a before/after tool check with installed paths and versions
 - installs packages automatically unless `DOTFILES_SKIP_PACKAGES=1` is set
+- `./setup` prompts before installing optional tools: Codex, Claude, and `spotify_player`
+- `./setup-luis` installs those optional tools without prompting
 - updates existing supported tools by default; set `DOTFILES_UPDATE_TOOLS=0` to only install missing Linux release/script tools
 - macOS uses `brew bundle`
 - Linux/WSL uses `apt-get`, `dnf`, or `yum`; this covers Amazon Linux on EC2 through `dnf`/`yum`
@@ -44,7 +50,9 @@ The installer detects `macos`, `linux`, `wsl`, or `windows`.
 - Neovim config prefers Zig for Treesitter parser builds by setting `CC="zig cc"` and `CXX="zig c++"` when `zig` is available
 - Linux installs or updates ripgrep (`rg`) and fd from official release archives when distro packages are missing or stale
 - Linux also installs or updates lazygit, starship, zoxide, and Atuin through upstream install scripts/releases when packages are not available
-- pnpm, Codex, and Claude CLIs install/update through npm into `$HOME/.local`
+- pnpm installs/updates through npm into `$HOME/.local`
+- Codex and Claude CLIs install/update through npm into `$HOME/.local` only when selected
+- `spotify_player` installs through Homebrew on macOS when available, or through Cargo on Linux/WSL
 - pnpm defaults to `pnpm@10` to avoid `pnpm@11` requiring Node `>=22.13`; override with `DOTFILES_PNPM_SPEC=pnpm@latest`
 - Rust installs through `rustup` on Linux so Amazon Linux does not use its older repo `rustc`; the default minimum is `1.74.1`, override with `DOTFILES_RUST_MIN_VERSION`
 - `tree-sitter-cli` defaults to `0.22.6`; override with `DOTFILES_TREE_SITTER_CLI_VERSION` or `DOTFILES_TREE_SITTER_CLI_VERSIONS`
@@ -87,6 +95,7 @@ source "/path/to/dotfiles/zsh_stuff"
 
 - lazygit `state.yml`, because it stores recent repos, PRs, and command history
 - Atuin history database, keys, and session files
+- spotify-player cache, logs, and auth credentials
 - GitHub auth and global `.gitconfig`
 
 ## Packages

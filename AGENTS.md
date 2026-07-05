@@ -17,6 +17,8 @@ This repo is personal shell and terminal setup. Keep changes narrow and preserve
 - tmux AI status helper: `scripts/tmux-ai-window-status`
 - Ghostty config: `config/ghostty/config.ghostty`
 - Installer and symlink management: `install.sh`
+- General entrypoint: `setup`
+- Luis entrypoint: `setup-luis`
 - Package lists: `os/`
 - Repo overview: `README.md`
 
@@ -28,6 +30,8 @@ This repo is personal shell and terminal setup. Keep changes narrow and preserve
 - `tm intelli` opens the Intellimind session.
 - `tm walnut` opens the Walnut learning session.
 - Generic `tm <path>` creates a project session from a directory path.
+- `./setup` is the general setup and prompts for optional tools.
+- `./setup-luis` installs Luis' optional tools without prompting.
 
 ## Editing Rules
 

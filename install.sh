@@ -50,18 +50,53 @@ tool_updates_enabled() {
 managed_tools_for_os() {
     case "$1" in
         macos)
-            printf '%s\n' git zsh tmux lazygit starship zoxide atuin nvim node npm pnpm gh rg fd eza bat jq fzf codex claude
+            printf '%s\n' git zsh tmux lazygit starship zoxide atuin nvim node npm pnpm gh rg fd eza bat jq fzf
             ;;
         linux|wsl)
-            printf '%s\n' git zsh tmux lazygit starship zoxide atuin nvim rustc cargo zig tree-sitter node npm pnpm gh rg fd eza bat jq fzf codex claude
+            printf '%s\n' git zsh tmux lazygit starship zoxide atuin nvim rustc cargo zig tree-sitter node npm pnpm gh rg fd eza bat jq fzf
             ;;
         windows)
-            printf '%s\n' git node npm pnpm gh lazygit starship zoxide nvim rg fd eza bat jq fzf codex claude
+            printf '%s\n' git node npm pnpm gh lazygit starship zoxide nvim rg fd eza bat jq fzf
             ;;
         *)
-            printf '%s\n' git zsh node npm codex claude
+            printf '%s\n' git zsh node npm
             ;;
     esac
+
+    if tool_status_should_include claude DOTFILES_INSTALL_CLAUDE; then
+        printf '%s\n' claude
+    fi
+
+    if tool_status_should_include codex DOTFILES_INSTALL_CODEX; then
+        printf '%s\n' codex
+    fi
+
+    if tool_status_should_include spotify_player DOTFILES_INSTALL_SPOTIFY_PLAYER; then
+        printf '%s\n' spotify_player
+    fi
+}
+
+env_flag_enabled() {
+    local env_name=$1
+    local value
+
+    value=$(printenv "$env_name" 2>/dev/null || true)
+
+    case "$value" in
+        1|true|TRUE|yes|YES|y|Y)
+            return 0
+            ;;
+        *)
+            return 1
+            ;;
+    esac
+}
+
+tool_status_should_include() {
+    local tool=$1
+    local env_name=$2
+
+    command -v "$tool" >/dev/null 2>&1 || env_flag_enabled "$env_name"
 }
 
 tool_version() {
@@ -193,6 +228,61 @@ print_update_candidates() {
     else
         printf '  skip: npm not installed\n'
     fi
+}
+
+optional_tool_enabled() {
+    local env_name=$1
+    local label=$2
+    local prompt=$3
+    local value
+    local reply
+
+    value=$(printenv "$env_name" 2>/dev/null || true)
+
+    case "$value" in
+        1|true|TRUE|yes|YES|y|Y)
+            return 0
+            ;;
+        0|false|FALSE|no|NO|n|N)
+            printf 'skip: %s disabled by %s=%s\n' "$label" "$env_name" "$value"
+            return 1
+            ;;
+    esac
+
+    if [ "${DOTFILES_INSTALL_OPTIONAL_TOOLS:-0}" = "1" ]; then
+        return 0
+    fi
+
+    if [ "${DOTFILES_PROMPT_OPTIONAL_TOOLS:-0}" != "1" ]; then
+        printf 'skip: %s optional install not selected\n' "$label"
+        return 1
+    fi
+
+    if [ ! -t 0 ]; then
+        printf 'skip: %s prompt unavailable; set %s=1 to install\n' "$label" "$env_name"
+        return 1
+    fi
+
+    while true; do
+        printf '%s [y/N] ' "$prompt"
+        if ! read -r reply; then
+            printf '\nskip: %s\n' "$label"
+            return 1
+        fi
+
+        case "$reply" in
+            y|Y|yes|YES)
+                return 0
+                ;;
+            ""|n|N|no|NO)
+                printf 'skip: %s\n' "$label"
+                return 1
+                ;;
+            *)
+                printf 'Please answer y or n.\n'
+                ;;
+        esac
+    done
 }
 
 link_file() {
@@ -1005,17 +1095,95 @@ install_linux_packages() {
     install_shell_tool_scripts_linux
 }
 
-install_node_clis() {
+setup_npm_prefix() {
     if ! command -v npm >/dev/null 2>&1; then
-        printf 'warn: npm not found; skipping Codex and Claude CLI install\n'
-        return
+        printf 'warn: npm not found; skipping npm global installs\n'
+        return 1
     fi
-
-    local pnpm_spec="${DOTFILES_PNPM_SPEC:-pnpm@10}"
 
     mkdir -p "$HOME/.local"
     npm config set prefix "$HOME/.local" >/dev/null 2>&1 || printf 'warn: failed to set npm prefix\n'
-    npm install -g "$pnpm_spec" @openai/codex@latest @anthropic-ai/claude-code@latest || printf 'warn: failed to install pnpm/Codex/Claude CLIs\n'
+}
+
+install_pnpm_cli() {
+    local pnpm_spec="${DOTFILES_PNPM_SPEC:-pnpm@10}"
+
+    setup_npm_prefix || return
+    npm install -g "$pnpm_spec" || printf 'warn: failed to install pnpm CLI\n'
+}
+
+install_codex_cli() {
+    setup_npm_prefix || return
+    npm install -g @openai/codex@latest || printf 'warn: failed to install Codex CLI\n'
+}
+
+install_claude_cli() {
+    setup_npm_prefix || return
+    npm install -g @anthropic-ai/claude-code@latest || printf 'warn: failed to install Claude CLI\n'
+}
+
+install_node_clis() {
+    install_pnpm_cli
+
+    if optional_tool_enabled DOTFILES_INSTALL_CLAUDE "Claude CLI" "Install Claude CLI?"; then
+        install_claude_cli
+    fi
+
+    if optional_tool_enabled DOTFILES_INSTALL_CODEX "Codex CLI" "Install Codex CLI?"; then
+        install_codex_cli
+    fi
+}
+
+install_spotify_player_with_cargo() {
+    if ! command -v cargo >/dev/null 2>&1; then
+        printf 'warn: cargo not found; cannot install spotify_player\n'
+        return
+    fi
+
+    mkdir -p "$HOME/.local"
+    cargo install spotify_player --locked --root "$HOME/.local" --force || printf 'warn: failed to install spotify_player with cargo\n'
+}
+
+install_spotify_player() {
+    local os_name=$1
+
+    case "$os_name" in
+        macos)
+            if command -v brew >/dev/null 2>&1; then
+                if brew list spotify_player >/dev/null 2>&1; then
+                    brew upgrade spotify_player || printf 'ok: spotify_player already current or upgrade unavailable\n'
+                else
+                    brew install spotify_player || printf 'warn: failed to install spotify_player with Homebrew\n'
+                fi
+            else
+                install_spotify_player_with_cargo
+            fi
+            ;;
+        linux|wsl)
+            if ! command -v cargo >/dev/null 2>&1; then
+                install_rust_toolchain_linux
+            fi
+            install_spotify_player_with_cargo
+            ;;
+        windows)
+            if command -v cargo >/dev/null 2>&1; then
+                install_spotify_player_with_cargo
+            else
+                printf 'warn: native Windows spotify_player install needs Cargo or Scoop; WSL is recommended for tmux parity\n'
+            fi
+            ;;
+        *)
+            install_spotify_player_with_cargo
+            ;;
+    esac
+}
+
+install_optional_tools() {
+    local os_name=$1
+
+    if optional_tool_enabled DOTFILES_INSTALL_SPOTIFY_PLAYER "spotify_player" "Install spotify_player?"; then
+        install_spotify_player "$os_name"
+    fi
 }
 
 install_packages_for_os() {
@@ -1030,13 +1198,16 @@ install_packages_for_os() {
         macos)
             install_macos_packages
             install_node_clis
+            install_optional_tools "$os_name"
             ;;
         linux|wsl)
             install_linux_packages
             install_node_clis
+            install_optional_tools "$os_name"
             ;;
         windows)
             install_node_clis
+            install_optional_tools "$os_name"
             ;;
         *)
             printf 'warn: unknown OS; skipping package install\n'

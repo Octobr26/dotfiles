@@ -1,0 +1,8 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+DOTFILES_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
+
+export DOTFILES_PROMPT_OPTIONAL_TOOLS="${DOTFILES_PROMPT_OPTIONAL_TOOLS:-1}"
+
+exec "$DOTFILES_DIR/install.sh" "$@"
