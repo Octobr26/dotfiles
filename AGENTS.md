@@ -18,6 +18,7 @@ This repo is personal shell and terminal setup. Keep changes narrow and preserve
 - tmux shortcut guide: `docs/tm-shortcuts.md`
 - tmux AI status helper: `scripts/tmux-ai-window-status`
 - Ghostty config: `config/ghostty/config.ghostty`
+- Global agent instructions: `config/agents/AGENTS.md`
 - Installer and symlink management: `install.sh`
 - General entrypoint: `setup`
 - Luis entrypoint: `setup-luis`

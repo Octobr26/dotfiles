@@ -7,6 +7,7 @@ Personal shell and terminal setup.
 - `zsh_stuff`
 - `AGENTS.md`
 - `CLAUDE.md`
+- `config/agents/AGENTS.md`
 - `.ignore`
 - `.tmux.conf`
 - `config/nvim`
@@ -24,7 +25,9 @@ Personal shell and terminal setup.
 
 ## AI Agent Notes
 
-`AGENTS.md` is the shared map for Codex and other agents. `CLAUDE.md` exists only as Claude's entry point and points back to `AGENTS.md`, so repo guidance stays in one place.
+Repo `AGENTS.md` is the shared map for agents working inside this dotfiles checkout. `CLAUDE.md` exists only as Claude's repo entry point and points back to `AGENTS.md`, so repo guidance stays in one place.
+
+`config/agents/AGENTS.md` is the global high-level agent instruction source for Luis' computer. The installer links it to `~/AGENTS.md`, then links `~/CLAUDE.md`, `~/.codex/AGENTS.md`, and `~/.claude/CLAUDE.md` back to `~/AGENTS.md`.
 
 ## Install
 
@@ -61,6 +64,7 @@ The installer detects `macos`, `linux`, `wsl`, or `windows`.
 - Zig defaults to `0.13.0` for Amazon Linux compatibility; override with `DOTFILES_ZIG_VERSION`
 - after package work, it reports any remaining Homebrew, Linux package-manager, or npm global updates it can see
 - links `.ignore` to `~/.ignore`
+- links global agent instructions through `~/AGENTS.md` for Codex and Claude entrypoints
 - macOS/Linux/WSL: links `.tmux.conf`
 - macOS: links Ghostty and lazygit from their `~/Library/Application Support/...` locations
 - Linux/WSL: links Ghostty and lazygit under `~/.config/...`
@@ -98,6 +102,10 @@ Then edit `scripts/tm.local`. See `docs/tm-shortcuts.md` for the shortcut contra
 ```sh
 ~/.tmux.conf -> ~/dev/dotfiles/.tmux.conf
 ~/.ignore -> ~/dev/dotfiles/.ignore
+~/AGENTS.md -> ~/dev/dotfiles/config/agents/AGENTS.md
+~/CLAUDE.md -> ~/AGENTS.md
+~/.codex/AGENTS.md -> ~/AGENTS.md
+~/.claude/CLAUDE.md -> ~/AGENTS.md
 ~/.config/nvim -> ~/dev/dotfiles/config/nvim
 ~/.config/atuin -> ~/dev/dotfiles/config/atuin
 ~/.config/git/ignore -> ~/dev/dotfiles/config/git/ignore

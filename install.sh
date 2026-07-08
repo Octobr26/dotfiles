@@ -342,6 +342,16 @@ link_windows_configs() {
     link_file "$DOTFILES_DIR/config/lazygit/config.yml" "$roaming_app_data/lazygit/config.yml"
 }
 
+link_agent_instructions() {
+    local source="$DOTFILES_DIR/config/agents/AGENTS.md"
+    local home_agents="$HOME/AGENTS.md"
+
+    link_file "$source" "$home_agents"
+    link_file "$home_agents" "$HOME/CLAUDE.md"
+    link_file "$home_agents" "$HOME/.codex/AGENTS.md"
+    link_file "$home_agents" "$HOME/.claude/CLAUDE.md"
+}
+
 print_missing() {
     local missing=()
     local tool
@@ -1310,6 +1320,7 @@ main() {
                 ensure_readline_setup
             fi
             ensure_zsh_setup
+            link_agent_instructions
             link_file "$DOTFILES_DIR/.ignore" "$HOME/.ignore"
             link_file "$DOTFILES_DIR/.tmux.conf" "$HOME/.tmux.conf"
             if [ "$os_name" = "macos" ]; then
@@ -1322,12 +1333,14 @@ main() {
             ;;
         windows)
             ensure_zsh_setup
+            link_agent_instructions
             link_file "$DOTFILES_DIR/.ignore" "$HOME/.ignore"
             link_windows_configs
             print_missing git gh lazygit starship zoxide nvim rg fd eza bat jq fzf
             ;;
         *)
             ensure_zsh_setup
+            link_agent_instructions
             link_file "$DOTFILES_DIR/.ignore" "$HOME/.ignore"
             print_missing zsh git gh
             ;;
