@@ -15,6 +15,7 @@ typeset -U path
 export PATH
 alias lg='lazygit'
 alias cc='claude'
+alias reload='exec zsh'
 
 if command -v starship >/dev/null 2>&1; then
     eval "$(starship init zsh)"
