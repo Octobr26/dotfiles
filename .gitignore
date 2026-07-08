@@ -16,3 +16,4 @@ config/atuin/history.db
 config/atuin/key
 config/atuin/session
 config/atuin/*.db
+scripts/tm.local

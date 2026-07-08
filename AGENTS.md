@@ -14,6 +14,8 @@ This repo is personal shell and terminal setup. Keep changes narrow and preserve
 - Shell startup: `zsh_stuff`
 - tmux config: `.tmux.conf`
 - tmux project launcher: `scripts/tm`
+- tmux private shortcut example: `scripts/tm.local.example`
+- tmux shortcut guide: `docs/tm-shortcuts.md`
 - tmux AI status helper: `scripts/tmux-ai-window-status`
 - Ghostty config: `config/ghostty/config.ghostty`
 - Installer and symlink management: `install.sh`
@@ -26,10 +28,8 @@ This repo is personal shell and terminal setup. Keep changes narrow and preserve
 
 - `~/.zshrc` is not owned by this repo. `install.sh` adds a managed block that puts `scripts/` on `PATH` and sources `zsh_stuff`.
 - `Ctrl-a` is the tmux prefix. Common bindings live in `.tmux.conf`.
-- `tm frontend` opens the CVO frontend session.
-- `tm intelli` opens the Intellimind session.
-- `tm walnut` opens the Walnut learning session.
 - Generic `tm <path>` creates a project session from a directory path.
+- Private `tm <shortcut>` entries live in ignored `scripts/tm.local`; keep real client names and private paths there.
 - `./setup` is the general setup and prompts for optional tools.
 - `./setup-luis` installs Luis' optional tools without prompting.
 
@@ -40,11 +40,11 @@ This repo is personal shell and terminal setup. Keep changes narrow and preserve
 - For terminal behavior questions, identify the layer first: Ghostty, zsh, tmux, or helper script.
 - Prefer changing the actual source file in this repo over editing symlink targets elsewhere.
 - Do not add secrets, shell history databases, Atuin keys, GitHub auth, lazygit state, or global `.gitconfig`.
-- Keep personal workflow shortcuts consistent with existing `scripts/tm` session patterns.
+- Keep private workflow shortcuts consistent with `scripts/tm.local.example` and document reusable patterns in `docs/tm-shortcuts.md`.
 
 ## Verification
 
 - Always run `git diff --check` before finishing.
 - When touching shell scripts, run `bash -n <script>`.
-- When touching `scripts/tm` Walnut behavior, run `bash tests/tm-walnut.sh`.
+- When touching `scripts/tm` shortcut dispatch, run `bash tests/tm-local-shortcuts.sh`.
 - When checking sync after push, use `git rev-list --left-right --count origin/main...main`.

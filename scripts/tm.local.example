@@ -1,0 +1,77 @@
+#!/usr/bin/env bash
+# Copy this file to scripts/tm.local and edit it for private machine shortcuts.
+# scripts/tm.local is ignored by git, so use it for private repo names and paths.
+
+tm_local_usage() {
+    echo "app|api"
+}
+
+tm_local_dispatch() {
+    case "$1" in
+        app)
+            create_app_session
+            ;;
+        api)
+            create_api_session
+            ;;
+        *)
+            return 1
+            ;;
+    esac
+}
+
+create_app_session() {
+    local session_name="app"
+    local project_dir="${TM_APP_DIR:-$HOME/work/example-app}"
+
+    if [ ! -d "$project_dir" ]; then
+        echo "Directory does not exist: $project_dir"
+        echo "Create it, symlink it, or set TM_APP_DIR to the project path."
+        exit 1
+    fi
+
+    if ! session_exists "$session_name"; then
+        tmux new-session -d -s "$session_name" -n server -c "$project_dir"
+        tmux send-keys -t "$session_name:server" 'pnpm dev' C-m
+
+        tmux new-window -t "$session_name" -n git -c "$project_dir"
+        tmux send-keys -t "$session_name:git" 'lg' C-m
+
+        tmux new-window -t "$session_name" -n code -c "$project_dir"
+        tmux send-keys -t "$session_name:code" 'nvim' C-m
+
+        create_ai_window "$session_name" "$project_dir"
+
+        tmux select-window -t "$session_name:git"
+    fi
+
+    attach_or_switch "$session_name"
+}
+
+create_api_session() {
+    local session_name="api"
+    local project_dir="${TM_API_DIR:-$HOME/work/example-api}"
+
+    if [ ! -d "$project_dir" ]; then
+        echo "Directory does not exist: $project_dir"
+        echo "Create it, symlink it, or set TM_API_DIR to the project path."
+        exit 1
+    fi
+
+    if ! session_exists "$session_name"; then
+        tmux new-session -d -s "$session_name" -n git -c "$project_dir"
+        tmux send-keys -t "$session_name:git" 'lg' C-m
+
+        tmux new-window -t "$session_name" -n code -c "$project_dir"
+        tmux send-keys -t "$session_name:code" 'nvim' C-m
+
+        tmux new-window -t "$session_name" -n shell -c "$project_dir"
+        tmux send-keys -t "$session_name:shell" 'clear' C-m
+
+        create_ai_window "$session_name" "$project_dir"
+
+        tmux select-window -t "$session_name:git"
+    fi
+
+    attach_or_switch "$session_name"
+}

@@ -15,9 +15,11 @@ Personal shell and terminal setup.
 - `config/ghostty/config.ghostty`
 - `config/lazygit/config.yml`
 - `scripts/tm`
+- `scripts/tm.local.example`
 - `install.sh`
 - `setup`
 - `setup-luis`
+- `docs/tm-shortcuts.md`
 - OS package hints under `os/`
 
 ## AI Agent Notes
@@ -79,6 +81,18 @@ source "/path/to/dotfiles/zsh_stuff"
 
 `zsh_stuff` also keeps `scripts/` and `$HOME/.local/bin` in PATH when sourced directly.
 
+## tm Shortcuts
+
+`scripts/tm` is public and generic. It supports `tm <path>` for any project directory, and it loads ignored private shortcuts from `scripts/tm.local` when that file exists.
+
+To add machine-specific shortcuts without publishing repo names or paths:
+
+```sh
+cp scripts/tm.local.example scripts/tm.local
+```
+
+Then edit `scripts/tm.local`. See `docs/tm-shortcuts.md` for the shortcut contract and an AI prompt you can reuse on another machine.
+
 ## Current local links
 
 ```sh
@@ -97,6 +111,7 @@ source "/path/to/dotfiles/zsh_stuff"
 - Atuin history database, keys, and session files
 - spotify-player cache, logs, and auth credentials
 - GitHub auth and global `.gitconfig`
+- private tmux shortcuts in `scripts/tm.local`
 
 ## Packages
 
