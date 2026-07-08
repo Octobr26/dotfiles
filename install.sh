@@ -1069,7 +1069,28 @@ install_shell_tool_scripts_linux() {
     fi
 }
 
+install_homebrew_macos() {
+    if command -v brew >/dev/null 2>&1; then
+        return
+    fi
+
+    printf 'install: Homebrew\n'
+    if ! NONINTERACTIVE=1 /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"; then
+        printf 'warn: Homebrew install failed\n'
+        return 1
+    fi
+
+    # brew is not on PATH yet in this shell; hook it up for the rest of the run
+    if [ -x /opt/homebrew/bin/brew ]; then
+        eval "$(/opt/homebrew/bin/brew shellenv)"
+    elif [ -x /usr/local/bin/brew ]; then
+        eval "$(/usr/local/bin/brew shellenv)"
+    fi
+}
+
 install_macos_packages() {
+    install_homebrew_macos || true
+
     if ! command -v brew >/dev/null 2>&1; then
         printf 'warn: Homebrew not found; skipping brew bundle\n'
         return
@@ -1284,12 +1305,49 @@ ensure_zsh_setup() {
     printf 'update: added dotfiles PATH/source block to %s\n' "$zshrc"
 }
 
+confirm_install_target() {
+    local detected_user detected_home reply_user reply_home
+    detected_user=$(id -un)
+    detected_home="$HOME"
+
+    if [ ! -t 0 ]; then
+        printf 'target: user=%s home=%s\n' "$detected_user" "$detected_home"
+        return
+    fi
+
+    printf 'Username [%s]: ' "$detected_user"
+    read -r reply_user || reply_user=""
+    reply_user="${reply_user:-$detected_user}"
+
+    printf 'Home directory [%s]: ' "$detected_home"
+    read -r reply_home || reply_home=""
+    reply_home="${reply_home:-$detected_home}"
+
+    if [ "$reply_user" != "$detected_user" ]; then
+        printf 'warn: running as %s but installing for %s; file ownership may be wrong\n' "$detected_user" "$reply_user"
+    fi
+
+    if [ ! -d "$reply_home" ]; then
+        printf 'error: home directory %s does not exist\n' "$reply_home"
+        exit 1
+    fi
+
+    if [ "$reply_home" != "$detected_home" ]; then
+        export HOME="$reply_home"
+        BACKUP_DIR="$HOME/.dotfiles-backup/$(date +%Y%m%d-%H%M%S)"
+    fi
+
+    printf 'target: user=%s home=%s\n\n' "$reply_user" "$HOME"
+}
+
 main() {
     local os_name
     os_name=$(detect_os)
 
     printf 'dotfiles: %s\n' "$DOTFILES_DIR"
     printf 'detected: %s\n\n' "$os_name"
+
+    confirm_install_target
 
     prepare_amazon_linux_ec2
     printf '\n'
