@@ -16,6 +16,7 @@ Personal shell and terminal setup.
 - `config/ghostty/config.ghostty`
 - `config/lazygit/config.yml`
 - `scripts/tm`
+- `scripts/worktree-preview`
 - `scripts/tm.local.example`
 - `install.sh`
 - `setup`

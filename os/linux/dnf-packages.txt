@@ -10,6 +10,7 @@ gh
 git
 gzip
 jq
+lsof
 make
 nodejs
 npm

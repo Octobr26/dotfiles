@@ -114,3 +114,45 @@ create_app_session() {
 ```
 
 Keep real client names, private paths, and one-off workflow commands in `scripts/tm.local`.
+
+## Worktree Frontend Preview
+
+`scripts/worktree-preview` lets one tmux session reuse port `3000` across existing Git worktrees.
+It controls the `server` window in the same session as Lazygit; it does not create another tmux session.
+
+Requirements:
+
+- Run Lazygit inside tmux.
+- Keep a window named `server` in that session.
+- Create a Git worktree for each branch you want to preview.
+- Have `lsof`, Node.js, and the project's package manager available.
+
+In Lazygit's local-branches panel:
+
+- `U` serves the selected branch's worktree in the session's `server` window.
+- `X` stops that server.
+- Tmux status shows `3000 -> <worktree-directory>`.
+
+First use in a worktree installs dependencies when needed.
+Later switches reuse that worktree's dependencies until its package or lockfile changes.
+If the main worktree has `.env`, missing worktree copies are symlinked from it.
+
+Preview identity is directory-based, not branch-polled.
+Lazygit already shows which branch each worktree contains.
+Switching a branch inside a served directory does not rewrite the tmux label; press `U` again after doing that.
+
+Defaults handle common Vite, Next.js, and Create React App projects using pnpm, npm, Yarn, or Bun.
+Override detection with repo-local Git config when needed:
+
+```sh
+git config worktreePreview.appDir frontend
+git config worktreePreview.port 3000
+git config worktreePreview.start 'pnpm run dev -- --port "$WORKTREE_PREVIEW_PORT" --strictPort'
+git config --add worktreePreview.envFile .env.local
+```
+
+Inspect without starting a server:
+
+```sh
+worktree-preview --dry-run feature/example
+```

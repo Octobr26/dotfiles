@@ -7,6 +7,7 @@ git
 gh
 jq
 lazygit
+lsof
 nodejs
 npm
 ripgrep
