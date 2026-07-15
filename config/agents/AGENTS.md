@@ -11,6 +11,7 @@ Keep this file short so it stays useful when loaded into every agent session.
 - Prefer the smallest correct change that fits existing patterns. Avoid speculative abstractions, broad rewrites, or unrelated cleanup.
 - Preserve user work. Inspect `git status` before edits, never revert changes you did not make, and stage or commit only when asked.
 - Verify with the narrowest meaningful check: focused test, lint, typecheck, build, screenshot, CLI output, or manual reproduction.
+- Run existing tests and checks when useful, but do not create or modify tests, fixtures, mock data, snapshots, or verification-only helpers unless Luis requests them or the agent first names the proposed behavior and edge cases and receives approval.
 - When runtime, deployment, live data, or current tool state matters, verify it directly instead of relying on memory.
 - If blocked, state the exact blocker, what was checked, and the next concrete verification path.
 
