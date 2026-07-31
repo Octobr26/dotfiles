@@ -13,33 +13,58 @@ if [ "${1:-}" = "--skip-flush" ]; then
     shift
 fi
 
-if [ "$#" -lt 1 ]; then
-    usage
-fi
+[ "$#" -gt 0 ] || usage
 
-if ! command -v mutagen >/dev/null 2>&1; then
+command -v git >/dev/null 2>&1 || {
+    echo "git is not installed or not in PATH"
+    exit 1
+}
+command -v mutagen >/dev/null 2>&1 || {
     echo "mutagen is not installed or not in PATH"
+    exit 1
+}
+
+local_root=$(git rev-parse --show-toplevel 2>/dev/null) || {
+    echo "Not inside a Git repository"
+    exit 1
+}
+local_root=$(cd "$local_root" && pwd -P)
+current_dir=$(pwd -P)
+project_name=$(basename "$local_root")
+relative_dir=${current_dir#"$local_root"}
+
+if [ "$current_dir" != "$local_root" ] && [ "$relative_dir" = "$current_dir" ]; then
+    echo "Current directory is outside the resolved Git repository: $local_root"
     exit 1
 fi
 
 ssh_host="${REMOTE_RUN_SSH_HOST:-dev}"
 remote_projects_dir="${REMOTE_RUN_PROJECTS_DIR:-/home/ec2-user/dev/projects}"
-project_name=$(basename "$PWD")
-local_dir=$(realpath "$PWD")
-remote_dir="$remote_projects_dir/$project_name"
+remote_root="${remote_projects_dir%/}/$project_name"
+remote_dir="$remote_root$relative_dir"
 
-session_name=$(
-    mutagen sync list --template '{{ range . }}{{ .Name }} {{ .Alpha.Path }}{{ "\n" }}{{ end }}' |
-        while read -r name alpha_path; do
-            if [ "$alpha_path" = "$local_dir" ]; then
-                printf '%s\n' "$name"
+session_record=$(
+    mutagen sync list --template '{{ range . }}{{ .Name }}|{{ .Alpha.Path }}|{{ .Beta.Path }}{{ "\n" }}{{ end }}' |
+        while IFS='|' read -r name alpha_path beta_path; do
+            if [ "$alpha_path" = "$local_root" ]; then
+                printf '%s|%s\n' "$name" "$beta_path"
                 break
             fi
         done
 )
 
-if [ -z "$session_name" ]; then
-    echo "No Mutagen sync session found for: $local_dir"
+if [ -z "$session_record" ]; then
+    echo "No Mutagen sync session found for: $local_root"
+    exit 1
+fi
+
+session_name=${session_record%%|*}
+session_beta=${session_record#*|}
+
+if [ "$session_beta" != "$remote_root" ]; then
+    echo "Mutagen Beta does not match the expected remote repository"
+    echo "Session:  $session_beta"
+    echo "Expected: $remote_root"
     exit 1
 fi
 
