@@ -54,4 +54,4 @@ for argument in "$@"; do
 done
 
 printf -v quoted_command '%q' "$remote_command"
-ssh -t -q "$ssh_host" "bash -lic $quoted_command"
+ssh -t -q "$ssh_host" "bash -lc $quoted_command"
