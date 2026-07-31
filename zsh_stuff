@@ -15,6 +15,8 @@ typeset -U path
 export PATH
 alias lg='lazygit'
 alias cc='claude'
+alias rr='remote_run --skip-flush'
+alias rfr='remote_run'
 alias reload='exec zsh'
 
 if command -v starship >/dev/null 2>&1; then

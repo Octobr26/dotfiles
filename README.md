@@ -15,6 +15,7 @@ Personal shell and terminal setup.
 - `config/git/ignore`
 - `config/ghostty/config.ghostty`
 - `config/lazygit/config.yml`
+- `scripts/remote_run`
 - `scripts/tm`
 - `scripts/worktree-preview`
 - `scripts/tm.local.example`
@@ -98,6 +99,44 @@ cp scripts/tm.local.example scripts/tm.local
 ```
 
 Then edit `scripts/tm.local`. See `docs/tm-shortcuts.md` for the shortcut contract and an AI prompt you can reuse on another machine.
+
+## Remote Commands
+
+`remote_run` executes a command in the matching Mutagen-synchronized project on an SSH host.
+The `rfr` alias flushes local changes before execution, while `rr` skips only the flush.
+
+Defaults:
+
+```sh
+REMOTE_RUN_SSH_HOST=dev
+REMOTE_RUN_PROJECTS_DIR=/home/ec2-user/dev/projects
+```
+
+Override either variable in private shell configuration when a machine uses a different SSH alias or remote project root.
+Run commands from the local project root so `remote_run` can match the current absolute path to its Mutagen session.
+
+Create one synchronization session from the project root on each development machine:
+
+```sh
+mutagen sync create \
+    --name <NAME> \
+    --mode one-way-safe \
+    --ignore-vcs \
+    --ignore node_modules \
+    --ignore .venv \
+    --ignore __pycache__ \
+    --ignore .pytest_cache \
+    --ignore .mypy_cache \
+    --ignore dist \
+    --ignore build \
+    --ignore .env \
+    ./ <SSH_HOST>:/home/<REMOTE_USER>/dev/projects/<PROJECT>
+```
+
+```sh
+rfr si resources/TableExport-Tabs/events/exclude-entity.json -b
+rr pytest resources/Controls/tests/test_controls.py -v
+```
 
 ## Current local links
 

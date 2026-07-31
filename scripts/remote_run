@@ -1,0 +1,57 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+usage() {
+    echo "Usage: $(basename "$0") [--skip-flush] <command> [args...]"
+    exit 1
+}
+
+skip_flush=0
+
+if [ "${1:-}" = "--skip-flush" ]; then
+    skip_flush=1
+    shift
+fi
+
+if [ "$#" -lt 1 ]; then
+    usage
+fi
+
+if ! command -v mutagen >/dev/null 2>&1; then
+    echo "mutagen is not installed or not in PATH"
+    exit 1
+fi
+
+ssh_host="${REMOTE_RUN_SSH_HOST:-dev}"
+remote_projects_dir="${REMOTE_RUN_PROJECTS_DIR:-/home/ec2-user/dev/projects}"
+project_name=$(basename "$PWD")
+local_dir=$(realpath "$PWD")
+remote_dir="$remote_projects_dir/$project_name"
+
+session_name=$(
+    mutagen sync list --template '{{ range . }}{{ .Name }} {{ .Alpha.Path }}{{ "\n" }}{{ end }}' |
+        while read -r name alpha_path; do
+            if [ "$alpha_path" = "$local_dir" ]; then
+                printf '%s\n' "$name"
+                break
+            fi
+        done
+)
+
+if [ -z "$session_name" ]; then
+    echo "No Mutagen sync session found for: $local_dir"
+    exit 1
+fi
+
+if [ "$skip_flush" -eq 0 ]; then
+    mutagen sync flush "$session_name"
+fi
+
+printf -v remote_command 'cd %q && exec' "$remote_dir"
+for argument in "$@"; do
+    printf -v quoted_argument ' %q' "$argument"
+    remote_command+="$quoted_argument"
+done
+
+printf -v quoted_command '%q' "$remote_command"
+ssh -t -q "$ssh_host" "bash -lic $quoted_command"
