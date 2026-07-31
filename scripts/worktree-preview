@@ -422,6 +422,8 @@ tmux_option() {
 
 set_runtime_state() {
     local pid="$1"
+    local runtime_cwd="${2:-$TARGET_APP}"
+    local runtime_label="${3:-$TARGET_LABEL}"
     local pgid
     local shell_pgid
     local shell_pid
@@ -434,13 +436,13 @@ set_runtime_state() {
     [[ "$shell_pgid" =~ ^[0-9]+$ && "$pgid" != "$shell_pgid" ]] ||
         fail "preview did not start in its own process group"
 
-    tmux set-option -q -t "$TMUX_SESSION" "$STATUS_OPTION" "$PREVIEW_PORT -> $TARGET_LABEL" ||
+    tmux set-option -q -t "$TMUX_SESSION" "$STATUS_OPTION" "$PREVIEW_PORT -> $runtime_label" ||
         fail "could not update tmux preview status"
     tmux set-option -q -t "$TMUX_SESSION" "$PANE_OPTION" "$SERVER_PANE" ||
         fail "could not record tmux preview pane"
     tmux set-option -q -t "$TMUX_SESSION" "$PID_OPTION" "$pid" ||
         fail "could not record preview PID"
-    tmux set-option -q -t "$TMUX_SESSION" "$CWD_OPTION" "$TARGET_APP" ||
+    tmux set-option -q -t "$TMUX_SESSION" "$CWD_OPTION" "$runtime_cwd" ||
         fail "could not record preview directory"
     tmux set-option -q -t "$TMUX_SESSION" "$PGID_OPTION" "$pgid" ||
         fail "could not record preview process group"
@@ -450,6 +452,36 @@ set_runtime_state() {
         fail "could not record preview window"
     tmux set-option -q -t "$TMUX_SESSION" "$SHELL_PID_OPTION" "$shell_pid" ||
         fail "could not record tmux pane shell PID"
+}
+
+adopt_server_pane_listener() {
+    local pid
+    local actual_cwd
+    local actual_pgid
+    local expected_app
+    local foreground_pgid
+    local listener_common_dir
+    local listener_root
+    local shell_pid
+
+    pid=$(listener_pid)
+    [[ -n "$pid" ]] || return 1
+    actual_cwd=$(process_cwd "$pid")
+    [[ -n "$actual_cwd" ]] || return 1
+    listener_root=$(git -C "$actual_cwd" rev-parse --show-toplevel 2>/dev/null) || return 1
+    listener_common_dir=$(absolute_common_dir "$listener_root") || return 1
+    [[ "$listener_common_dir" == "$COMMON_DIR" ]] || return 1
+    expected_app=$(cd "$listener_root/$APP_DIR" 2>/dev/null && pwd -P) || return 1
+    [[ "$actual_cwd" == "$expected_app" ]] || return 1
+
+    shell_pid=$(pane_shell_pid "$SERVER_PANE")
+    actual_pgid=$(process_group_id "$pid")
+    foreground_pgid=$(pane_foreground_pgid "$shell_pid")
+    [[ "$actual_pgid" =~ ^[0-9]+$ && "$actual_pgid" -gt 0 ]] || return 1
+    [[ "$foreground_pgid" == "$actual_pgid" ]] || return 1
+
+    set_runtime_state "$pid" "$actual_cwd" "$(basename "$listener_root")"
+    printf '%s\n' "$pid"
 }
 
 clear_runtime_state() {
@@ -663,6 +695,9 @@ activate_target() {
     [[ -z "$PACKAGE_MANAGER" ]] || command -v "$PACKAGE_MANAGER" >/dev/null 2>&1 || fail "$PACKAGE_MANAGER not found"
 
     owned_pid=$(owned_listener_pid 2>/dev/null || true)
+    if [[ -z "$owned_pid" ]]; then
+        owned_pid=$(adopt_server_pane_listener 2>/dev/null || true)
+    fi
     stored_cwd=$(tmux_option "$CWD_OPTION")
     stored_pane=$(tmux_option "$PANE_OPTION")
     stored_port=$(tmux_option "$PORT_OPTION")
