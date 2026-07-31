@@ -50,10 +50,10 @@ tool_updates_enabled() {
 managed_tools_for_os() {
     case "$1" in
         macos)
-            printf '%s\n' git zsh tmux lazygit starship zoxide atuin nvim node npm pnpm gh rg fd eza bat jq fzf
+            printf '%s\n' git zsh tmux lazygit starship zoxide atuin nvim node npm pnpm gh rg fd eza bat jq fzf mutagen
             ;;
         linux|wsl)
-            printf '%s\n' git zsh tmux lazygit starship zoxide atuin nvim rustc cargo zig tree-sitter node npm pnpm gh rg fd eza bat jq fzf
+            printf '%s\n' git zsh tmux lazygit starship zoxide atuin nvim rustc cargo zig tree-sitter node npm pnpm gh rg fd eza bat jq fzf mutagen
             ;;
         windows)
             printf '%s\n' git node npm pnpm gh lazygit starship zoxide nvim rg fd eza bat jq fzf
@@ -811,6 +811,77 @@ install_lazygit_linux() {
     rm -rf "$tmpdir"
 }
 
+install_mutagen_linux() {
+    if command -v mutagen >/dev/null 2>&1 && ! tool_updates_enabled; then
+        return
+    fi
+
+    if ! command -v curl >/dev/null 2>&1 || ! command -v tar >/dev/null 2>&1; then
+        printf 'warn: curl/tar missing; cannot install Mutagen release\n'
+        return
+    fi
+
+    local arch
+    case "$(uname -m)" in
+        x86_64|amd64)
+            arch="amd64"
+            ;;
+        aarch64|arm64)
+            arch="arm64"
+            ;;
+        *)
+            printf 'warn: unsupported architecture for Mutagen install: %s\n' "$(uname -m)"
+            return
+            ;;
+    esac
+
+    local version
+    version=$( (curl -fsSL https://api.github.com/repos/mutagen-io/mutagen/releases/latest || true) | sed -n 's/.*"tag_name": *"\([^"]*\)".*/\1/p' | head -n 1)
+
+    if [ -z "$version" ]; then
+        printf 'warn: could not determine latest Mutagen version\n'
+        return
+    fi
+
+    local installed_version
+    installed_version=$( (mutagen version 2>/dev/null || true) | sed -n 's/^[^0-9]*\([0-9][^[:space:]]*\).*/v\1/p' | head -n 1)
+
+    if [ "$installed_version" = "$version" ]; then
+        printf 'ok: Mutagen %s current\n' "$version"
+        return
+    fi
+
+    local asset="mutagen_linux_${arch}_${version}.tar.gz"
+    local tmpdir
+    tmpdir=$(mktemp -d)
+    mkdir -p "$HOME/.local/bin"
+
+    if ! curl -fsSL "https://github.com/mutagen-io/mutagen/releases/download/${version}/${asset}" -o "$tmpdir/$asset" ||
+        ! curl -fsSL "https://github.com/mutagen-io/mutagen/releases/download/${version}/SHA256SUMS" -o "$tmpdir/SHA256SUMS"; then
+        printf 'warn: failed to download Mutagen release\n'
+        rm -rf "$tmpdir"
+        return
+    fi
+
+    if command -v sha256sum >/dev/null 2>&1; then
+        if ! (cd "$tmpdir" && grep "  ${asset}\$" SHA256SUMS | sha256sum --check --status); then
+            printf 'warn: Mutagen release checksum verification failed\n'
+            rm -rf "$tmpdir"
+            return
+        fi
+    fi
+
+    if tar -xzf "$tmpdir/$asset" -C "$tmpdir" mutagen mutagen-agents.tar.gz; then
+        install -m 0755 "$tmpdir/mutagen" "$HOME/.local/bin/mutagen"
+        install -m 0644 "$tmpdir/mutagen-agents.tar.gz" "$HOME/.local/bin/mutagen-agents.tar.gz"
+        printf 'install: Mutagen %s -> %s\n' "$version" "$HOME/.local/bin/mutagen"
+    else
+        printf 'warn: failed to extract Mutagen release\n'
+    fi
+
+    rm -rf "$tmpdir"
+}
+
 install_neovim_linux() {
     if command -v nvim >/dev/null 2>&1 && ! tool_updates_enabled; then
         return
@@ -1123,6 +1194,7 @@ install_linux_packages() {
         ensure_mason_tree_sitter_uses_local_cli
     fi
     install_lazygit_linux
+    install_mutagen_linux
     install_shell_tool_scripts_linux
 }
 
@@ -1383,10 +1455,10 @@ main() {
             link_file "$DOTFILES_DIR/.tmux.conf" "$HOME/.tmux.conf"
             if [ "$os_name" = "macos" ]; then
                 link_macos_configs
-                print_missing zsh tmux lazygit starship zoxide atuin nvim pnpm gh rg fd eza bat jq fzf
+                print_missing zsh tmux lazygit starship zoxide atuin nvim pnpm gh rg fd eza bat jq fzf mutagen
             else
                 link_linux_configs
-                print_missing zsh tmux lazygit starship zoxide atuin nvim rustc cargo zig tree-sitter pnpm gh rg fd eza bat jq fzf
+                print_missing zsh tmux lazygit starship zoxide atuin nvim rustc cargo zig tree-sitter pnpm gh rg fd eza bat jq fzf mutagen
             fi
             ;;
         windows)

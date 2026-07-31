@@ -56,6 +56,7 @@ The installer detects `macos`, `linux`, `wsl`, or `windows`.
 - Neovim config prefers Zig for Treesitter parser builds by setting `CC="zig cc"` and `CXX="zig c++"` when `zig` is available
 - Linux installs or updates ripgrep (`rg`) and fd from official release archives when distro packages are missing or stale
 - Linux also installs or updates lazygit, starship, zoxide, and Atuin through upstream install scripts/releases when packages are not available
+- Mutagen installs through Homebrew on macOS or from its official release archive on Linux/WSL
 - pnpm installs/updates through npm into `$HOME/.local`
 - Codex and Claude CLIs install/update through npm into `$HOME/.local` only when selected
 - `spotify_player` installs through Homebrew on macOS when available, or through Cargo on Linux/WSL
