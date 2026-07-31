@@ -1,0 +1,106 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+usage() {
+    cat <<'EOF'
+Usage: msync
+
+Create a Mutagen session for the Git repository containing the current directory.
+
+Environment:
+  REMOTE_RUN_SSH_HOST       SSH host alias (default: dev)
+  REMOTE_RUN_PROJECTS_DIR   Remote project root (default: /home/ec2-user/dev/projects)
+EOF
+}
+
+fail() {
+    printf 'error: %s\n' "$*" >&2
+    exit 1
+}
+
+case "${1:-}" in
+    -h|--help)
+        usage
+        exit 0
+        ;;
+    "")
+        ;;
+    *)
+        usage >&2
+        exit 1
+        ;;
+esac
+
+for command_name in git mutagen ssh; do
+    command -v "$command_name" >/dev/null 2>&1 || fail "$command_name is not installed or not in PATH"
+done
+
+alpha=$(git rev-parse --show-toplevel 2>/dev/null) || fail "not inside a Git repository"
+alpha=$(cd "$alpha" && pwd -P)
+project=$(basename "$alpha")
+
+case "$project" in
+    ""|*[!A-Za-z0-9._-]*)
+        fail "unsafe project directory name: $project"
+        ;;
+esac
+
+ssh_host="${REMOTE_RUN_SSH_HOST:-dev}"
+remote_projects_dir="${REMOTE_RUN_PROJECTS_DIR:-/home/ec2-user/dev/projects}"
+remote_dir="${remote_projects_dir%/}/$project"
+session_name=$(printf '%s' "$project" |
+    tr '[:upper:]_' '[:lower:]-' |
+    sed 's/[^a-z0-9-]/-/g; s/--*/-/g; s/^-//; s/-$//')
+
+[ -n "$session_name" ] || fail "could not derive a Mutagen session name from: $project"
+
+printf -v quoted_remote_dir '%q' "$remote_dir"
+remote_root=$(
+    ssh -q "$ssh_host" "git -C $quoted_remote_dir rev-parse --show-toplevel" 2>/dev/null
+) || fail "remote Git repository not found: $ssh_host:$remote_dir"
+
+[ "$remote_root" = "$remote_dir" ] ||
+    fail "remote path is inside a different Git repository: $remote_root"
+
+local_status=$(git -C "$alpha" status --porcelain --ignored)
+[ -z "$local_status" ] || fail "local repository has uncommitted, untracked, or ignored files: $alpha"
+
+remote_status=$(ssh -q "$ssh_host" "git -C $quoted_remote_dir status --porcelain --ignored") ||
+    fail "could not inspect remote repository status"
+[ -z "$remote_status" ] || fail "remote repository has uncommitted, untracked, or ignored files: $ssh_host:$remote_dir"
+
+local_head=$(git -C "$alpha" rev-parse HEAD)
+remote_head=$(ssh -q "$ssh_host" "git -C $quoted_remote_dir rev-parse HEAD") ||
+    fail "could not inspect the remote repository commit"
+
+if [ "$local_head" != "$remote_head" ]; then
+    printf 'error: local and remote repositories are on different commits\n' >&2
+    printf 'local:  %s\n' "$local_head" >&2
+    printf 'remote: %s\n' "$remote_head" >&2
+    exit 1
+fi
+
+sessions=$(mutagen sync list --template '{{ range . }}{{ .Name }}|{{ .Alpha.Path }}{{ "\n" }}{{ end }}')
+while IFS='|' read -r existing_name existing_alpha; do
+    [ -n "$existing_name" ] || continue
+    [ "$existing_name" != "$session_name" ] || fail "Mutagen session already exists: $session_name"
+    [ "$existing_alpha" != "$alpha" ] || fail "a Mutagen session already uses this local repository: $existing_name"
+done <<<"$sessions"
+
+printf 'Session: %s\nAlpha:   %s\nBeta:    %s:%s\n' \
+    "$session_name" "$alpha" "$ssh_host" "$remote_dir"
+
+mutagen sync create \
+    --name "$session_name" \
+    --mode one-way-safe \
+    --ignore-vcs \
+    --ignore node_modules \
+    --ignore .venv \
+    --ignore __pycache__ \
+    --ignore .pytest_cache \
+    --ignore .mypy_cache \
+    --ignore dist \
+    --ignore build \
+    --ignore .env \
+    "$alpha" \
+    "$ssh_host:$remote_dir"

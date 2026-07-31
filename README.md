@@ -15,6 +15,7 @@ Personal shell and terminal setup.
 - `config/git/ignore`
 - `config/ghostty/config.ghostty`
 - `config/lazygit/config.yml`
+- `scripts/remote_run`
 - `scripts/tm`
 - `scripts/worktree-preview`
 - `scripts/tm.local.example`
@@ -56,6 +57,7 @@ The installer detects `macos`, `linux`, `wsl`, or `windows`.
 - Neovim config prefers Zig for Treesitter parser builds by setting `CC="zig cc"` and `CXX="zig c++"` when `zig` is available
 - Linux installs or updates ripgrep (`rg`) and fd from official release archives when distro packages are missing or stale
 - Linux also installs or updates lazygit, starship, zoxide, and Atuin through upstream install scripts/releases when packages are not available
+- Mutagen installs through Homebrew on macOS or from its official release archive on Linux/WSL
 - pnpm installs/updates through npm into `$HOME/.local`
 - Codex and Claude CLIs install/update through npm into `$HOME/.local` only when selected
 - `spotify_player` installs through Homebrew on macOS when available, or through Cargo on Linux/WSL
@@ -97,6 +99,32 @@ cp scripts/tm.local.example scripts/tm.local
 ```
 
 Then edit `scripts/tm.local`. See `docs/tm-shortcuts.md` for the shortcut contract and an AI prompt you can reuse on another machine.
+
+## Remote Commands
+
+`msync` safely creates a one-way synchronization session from the current local Git repository to the matching project directory on an SSH host.
+`rfr` executes a remote command after flushing that session, while `rr` skips only the explicit flush.
+
+Defaults:
+
+```sh
+REMOTE_RUN_SSH_HOST=dev
+REMOTE_RUN_PROJECTS_DIR=/home/ec2-user/dev/projects
+```
+
+Override either variable in private shell configuration when a machine uses a different SSH alias or remote project root.
+Clone the same repository locally and remotely, check out the same commit, and run this from anywhere inside the local repository:
+
+```sh
+msync
+```
+
+```sh
+rfr si resources/TableExport-Tabs/events/exclude-entity.json -b
+rr pytest resources/Controls/tests/test_controls.py -v
+```
+
+See `docs/mutagen-remote-workflow.md` for the safety checks, endpoint mapping, and macOS setup.
 
 ## Current local links
 
