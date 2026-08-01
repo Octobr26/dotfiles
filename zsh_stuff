@@ -13,6 +13,7 @@ fi
 path=("$HOME/.local/bin" "$dotfiles_dir/scripts" $path)
 typeset -U path
 export PATH
+alias ls='eza --icons=always -x --sort=extension'
 alias lg='lazygit'
 alias cc='claude'
 alias rr='remote_run --skip-flush'
