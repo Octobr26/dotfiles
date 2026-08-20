@@ -19,6 +19,7 @@ Personal shell and terminal setup.
 - `config/lazygit/config.yml`
 - `scripts/remote_run`
 - `scripts/tm`
+- `scripts/sync-agent-tools`
 - `scripts/worktree-preview`
 - `scripts/tm.local.example`
 - `install.sh`
@@ -38,6 +39,9 @@ Its research route separates evidence collection, synthesis, and local pattern-f
 Its challenge route uses bounded, evidence-driven skepticism and adjudication for material assumptions and results.
 
 `config/claude/agents/` provides user-level Claude Code subagents with explicit model selection and supported effort settings for the universal pipeline. The installer links each definition into `~/.claude/agents/` without taking ownership of unrelated personal subagents.
+
+Portable agent skills use `~/.agents/skills/` as their canonical location and are shared with Codex and Claude through the cross-agent Skills CLI.
+Agent-specific model settings, permissions, authentication, plugins, and hooks remain separate.
 
 ## Install
 
@@ -68,6 +72,8 @@ The installer detects `macos`, `linux`, `wsl`, or `windows`.
 - Mutagen installs through Homebrew on macOS or from its official release archive on Linux/WSL
 - pnpm installs/updates through npm into `$HOME/.local`
 - Codex and Claude CLIs install/update through npm into `$HOME/.local` only when selected
+- syncs `gh-axi` from one canonical global skill into Codex and Claude
+- installs or updates the `gh-dash` GitHub CLI extension
 - `spotify_player` installs through Homebrew on macOS when available, or through Cargo on Linux/WSL
 - pnpm defaults to `pnpm@10` to avoid `pnpm@11` requiring Node `>=22.13`; override with `DOTFILES_PNPM_SPEC=pnpm@latest`
 - Rust installs through `rustup` on Linux so Amazon Linux does not use its older repo `rustc`; the default minimum is `1.74.1`, override with `DOTFILES_RUST_MIN_VERSION`
@@ -149,6 +155,8 @@ See `docs/mutagen-remote-workflow.md` for the safety checks, endpoint mapping, a
 ~/.claude/agents/pipeline-skeptic.md -> ~/dev/dotfiles/config/claude/agents/pipeline-skeptic.md
 ~/.claude/agents/pipeline-adjudicator.md -> ~/dev/dotfiles/config/claude/agents/pipeline-adjudicator.md
 ~/.claude/agents/pipeline-deep-agent.md -> ~/dev/dotfiles/config/claude/agents/pipeline-deep-agent.md
+~/.agents/skills/gh-axi
+~/.claude/skills/gh-axi -> ~/.agents/skills/gh-axi
 ~/.config/nvim -> ~/dev/dotfiles/config/nvim
 ~/.config/atuin -> ~/dev/dotfiles/config/atuin
 ~/.config/git/ignore -> ~/dev/dotfiles/config/git/ignore
@@ -162,6 +170,7 @@ See `docs/mutagen-remote-workflow.md` for the safety checks, endpoint mapping, a
 - Atuin history database, keys, and session files
 - spotify-player cache, logs, and auth credentials
 - GitHub auth and global `.gitconfig`
+- Codex- and Claude-specific model settings, permissions, authentication, plugins, and hooks
 - private tmux shortcuts in `scripts/tm.local`
 
 ## Packages
