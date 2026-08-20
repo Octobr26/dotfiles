@@ -350,6 +350,11 @@ link_agent_instructions() {
     link_file "$home_agents" "$HOME/CLAUDE.md"
     link_file "$home_agents" "$HOME/.codex/AGENTS.md"
     link_file "$home_agents" "$HOME/.claude/CLAUDE.md"
+    link_file "$DOTFILES_DIR/config/claude/agents/pipeline-collector.md" "$HOME/.claude/agents/pipeline-collector.md"
+    link_file "$DOTFILES_DIR/config/claude/agents/pipeline-maker.md" "$HOME/.claude/agents/pipeline-maker.md"
+    link_file "$DOTFILES_DIR/config/claude/agents/pipeline-skeptic.md" "$HOME/.claude/agents/pipeline-skeptic.md"
+    link_file "$DOTFILES_DIR/config/claude/agents/pipeline-adjudicator.md" "$HOME/.claude/agents/pipeline-adjudicator.md"
+    link_file "$DOTFILES_DIR/config/claude/agents/pipeline-deep-agent.md" "$HOME/.claude/agents/pipeline-deep-agent.md"
 }
 
 print_missing() {

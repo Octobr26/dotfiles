@@ -8,6 +8,8 @@ Personal shell and terminal setup.
 - `AGENTS.md`
 - `CLAUDE.md`
 - `config/agents/AGENTS.md`
+- `config/agents/pipelines/`
+- `config/claude/agents/`
 - `.ignore`
 - `.tmux.conf`
 - `config/nvim`
@@ -30,6 +32,12 @@ Personal shell and terminal setup.
 Repo `AGENTS.md` is the shared map for agents working inside this dotfiles checkout. `CLAUDE.md` exists only as Claude's repo entry point and points back to `AGENTS.md`, so repo guidance stays in one place.
 
 `config/agents/AGENTS.md` is the global high-level agent instruction source for Luis' computer. The installer links it to `~/AGENTS.md`, then links `~/CLAUDE.md`, `~/.codex/AGENTS.md`, and `~/.claude/CLAUDE.md` back to `~/AGENTS.md`.
+
+`config/agents/pipelines/` contains the portable routing layer for non-trivial work outside a project with its own workflow. It supports local, remote, and cloud execution without coupling task coordination to a specific agent UI or provider.
+Its research route separates evidence collection, synthesis, and local pattern-fit before a proposed change is planned.
+Its challenge route uses bounded, evidence-driven skepticism and adjudication for material assumptions and results.
+
+`config/claude/agents/` provides user-level Claude Code subagents with explicit model selection and supported effort settings for the universal pipeline. The installer links each definition into `~/.claude/agents/` without taking ownership of unrelated personal subagents.
 
 ## Install
 
@@ -68,6 +76,7 @@ The installer detects `macos`, `linux`, `wsl`, or `windows`.
 - after package work, it reports any remaining Homebrew, Linux package-manager, or npm global updates it can see
 - links `.ignore` to `~/.ignore`
 - links global agent instructions through `~/AGENTS.md` for Codex and Claude entrypoints
+- links the universal Claude pipeline agents individually under `~/.claude/agents/`
 - macOS/Linux/WSL: links `.tmux.conf`
 - macOS: links Ghostty and lazygit from their `~/Library/Application Support/...` locations
 - Linux/WSL: links Ghostty and lazygit under `~/.config/...`
@@ -135,6 +144,11 @@ See `docs/mutagen-remote-workflow.md` for the safety checks, endpoint mapping, a
 ~/CLAUDE.md -> ~/AGENTS.md
 ~/.codex/AGENTS.md -> ~/AGENTS.md
 ~/.claude/CLAUDE.md -> ~/AGENTS.md
+~/.claude/agents/pipeline-collector.md -> ~/dev/dotfiles/config/claude/agents/pipeline-collector.md
+~/.claude/agents/pipeline-maker.md -> ~/dev/dotfiles/config/claude/agents/pipeline-maker.md
+~/.claude/agents/pipeline-skeptic.md -> ~/dev/dotfiles/config/claude/agents/pipeline-skeptic.md
+~/.claude/agents/pipeline-adjudicator.md -> ~/dev/dotfiles/config/claude/agents/pipeline-adjudicator.md
+~/.claude/agents/pipeline-deep-agent.md -> ~/dev/dotfiles/config/claude/agents/pipeline-deep-agent.md
 ~/.config/nvim -> ~/dev/dotfiles/config/nvim
 ~/.config/atuin -> ~/dev/dotfiles/config/atuin
 ~/.config/git/ignore -> ~/dev/dotfiles/config/git/ignore

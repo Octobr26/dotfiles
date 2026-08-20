@@ -20,6 +20,8 @@ This repo is personal shell and terminal setup. Keep changes narrow and preserve
 - tmux AI status helper: `scripts/tmux-ai-window-status`
 - Ghostty config: `config/ghostty/config.ghostty`
 - Global agent instructions: `config/agents/AGENTS.md`
+- Universal agent pipelines: `config/agents/pipelines/README.md`
+- Claude pipeline subagents: `config/claude/agents/`
 - Installer and symlink management: `install.sh`
 - General entrypoint: `setup`
 - Luis entrypoint: `setup-luis`
