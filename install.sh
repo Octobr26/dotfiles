@@ -1321,6 +1321,8 @@ install_packages_for_os() {
             printf 'warn: unknown OS; skipping package install\n'
             ;;
     esac
+
+    "$DOTFILES_DIR/scripts/sync-agent-tools"
 }
 
 ensure_zsh_setup() {

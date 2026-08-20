@@ -1,5 +1,6 @@
 bindkey -v
 export KEYTIMEOUT=1
+setopt AUTO_CD
 
 dotfiles_source="${(%):-%x}"
 dotfiles_dir="${dotfiles_source:A:h}"
@@ -14,6 +15,12 @@ path=("$HOME/.local/bin" "$dotfiles_dir/scripts" $path)
 typeset -U path
 export PATH
 alias ls='eza --icons=always -x --sort=extension'
+
+if (( ! $+functions[compdef] )); then
+    autoload -Uz compinit
+    compinit
+fi
+
 alias lg='lazygit'
 alias cc='claude'
 alias rr='remote_run --skip-flush'

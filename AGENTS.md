@@ -14,6 +14,7 @@ This repo is personal shell and terminal setup. Keep changes narrow and preserve
 - Shell startup: `zsh_stuff`
 - tmux config: `.tmux.conf`
 - tmux project launcher: `scripts/tm`
+- shared Codex/Claude tools: `scripts/sync-agent-tools`
 - worktree frontend preview: `scripts/worktree-preview`
 - tmux private shortcut example: `scripts/tm.local.example`
 - tmux shortcut guide: `docs/tm-shortcuts.md`

@@ -1,0 +1,43 @@
+#!/usr/bin/env bash
+
+updates_enabled() {
+    [ "${DOTFILES_UPDATE_TOOLS:-1}" != "0" ]
+}
+
+sync_gh_axi() {
+    if ! command -v npx >/dev/null 2>&1; then
+        printf 'warn: npx not found; cannot sync gh-axi for Codex and Claude\n'
+        return
+    fi
+
+    printf 'sync: gh-axi for Codex and Claude\n'
+    npx -y skills add kunchenguid/gh-axi \
+        --skill gh-axi \
+        --global \
+        --agent codex claude-code \
+        --yes ||
+        printf 'warn: failed to sync gh-axi\n'
+}
+
+sync_gh_dash() {
+    if ! command -v gh >/dev/null 2>&1; then
+        printf 'warn: gh not found; cannot install gh-dash\n'
+        return
+    fi
+
+    if gh extension list 2>/dev/null | awk -F '\t' '$1 == "gh dash" { found = 1 } END { exit !found }'; then
+        if updates_enabled; then
+            gh extension upgrade gh-dash ||
+                printf 'warn: failed to update gh-dash\n'
+        else
+            printf 'ok: gh-dash already installed\n'
+        fi
+        return
+    fi
+
+    gh extension install dlvhdr/gh-dash ||
+        printf 'warn: failed to install gh-dash\n'
+}
+
+sync_gh_axi
+sync_gh_dash

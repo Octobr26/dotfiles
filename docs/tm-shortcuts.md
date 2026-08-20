@@ -115,6 +115,17 @@ create_app_session() {
 
 Keep real client names, private paths, and one-off workflow commands in `scripts/tm.local`.
 
+## CVO Shortcut AI Workspace
+
+For the CVO private shortcuts (`tm frontend`, `tm backend`, and `tm admin`),
+the project windows stay in their respective repositories, but the `ai` window
+starts in `/home/luisdiaz/cvo`. That parent workspace owns the shared
+`ai-context` and the cross-repository workflow guidance.
+
+Set `TM_AI_DIR` only if the parent workspace has a different local path. The
+CodeGraph routing and Admin scope are documented in
+`/home/luisdiaz/cvo/ai-context/patterns/workspace-routing.md`.
+
 ## Worktree Frontend Preview
 
 `scripts/worktree-preview` lets one tmux session reuse port `3000` across existing Git worktrees.
