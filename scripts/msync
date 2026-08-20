@@ -3,9 +3,12 @@ set -euo pipefail
 
 usage() {
     cat <<'EOF'
-Usage: msync
+Usage: msync [--ignore PATTERN]...
 
 Create a Mutagen session for the Git repository containing the current directory.
+
+Options:
+  --ignore PATTERN           Exclude an additional path or pattern from synchronization.
 
 Environment:
   REMOTE_RUN_SSH_HOST       SSH host alias (default: dev)
@@ -18,18 +21,31 @@ fail() {
     exit 1
 }
 
-case "${1:-}" in
-    -h|--help)
-        usage
-        exit 0
-        ;;
-    "")
-        ;;
-    *)
-        usage >&2
-        exit 1
-        ;;
-esac
+extra_ignore_args=()
+while [ "$#" -gt 0 ]; do
+    case "$1" in
+        -h|--help)
+            usage
+            exit 0
+            ;;
+        --ignore)
+            [ "$#" -ge 2 ] || fail "--ignore requires a pattern"
+            [ -n "$2" ] || fail "--ignore requires a non-empty pattern"
+            extra_ignore_args+=(--ignore "$2")
+            shift 2
+            ;;
+        --ignore=*)
+            ignore_pattern=${1#--ignore=}
+            [ -n "$ignore_pattern" ] || fail "--ignore requires a non-empty pattern"
+            extra_ignore_args+=(--ignore "$ignore_pattern")
+            shift
+            ;;
+        *)
+            usage >&2
+            exit 1
+            ;;
+    esac
+done
 
 for command_name in git mutagen ssh; do
     command -v "$command_name" >/dev/null 2>&1 || fail "$command_name is not installed or not in PATH"
@@ -62,12 +78,12 @@ remote_root=$(
 [ "$remote_root" = "$remote_dir" ] ||
     fail "remote path is inside a different Git repository: $remote_root"
 
-local_status=$(git -C "$alpha" status --porcelain --ignored)
-[ -z "$local_status" ] || fail "local repository has uncommitted, untracked, or ignored files: $alpha"
+local_status=$(git -C "$alpha" status --porcelain)
+[ -z "$local_status" ] || fail "local repository has uncommitted or untracked files: $alpha"
 
-remote_status=$(ssh -q "$ssh_host" "git -C $quoted_remote_dir status --porcelain --ignored") ||
+remote_status=$(ssh -q "$ssh_host" "git -C $quoted_remote_dir status --porcelain") ||
     fail "could not inspect remote repository status"
-[ -z "$remote_status" ] || fail "remote repository has uncommitted, untracked, or ignored files: $ssh_host:$remote_dir"
+[ -z "$remote_status" ] || fail "remote repository has uncommitted or untracked files: $ssh_host:$remote_dir"
 
 local_head=$(git -C "$alpha" rev-parse HEAD)
 remote_head=$(ssh -q "$ssh_host" "git -C $quoted_remote_dir rev-parse HEAD") ||
@@ -102,5 +118,6 @@ mutagen sync create \
     --ignore dist \
     --ignore build \
     --ignore .env \
+    "${extra_ignore_args[@]}" \
     "$alpha" \
     "$ssh_host:$remote_dir"

@@ -21,13 +21,20 @@ From anywhere inside the local repository, run:
 msync
 ```
 
+Add repeatable ignore patterns for repository sections that should stay local.
+For example, a backend-only session in a repository that also contains a frontend can be created with:
+
+```zsh
+msync --ignore frontend
+```
+
 `msync` resolves Alpha from the current Git repository root and derives Beta from the repository directory name.
 It creates a one-way-safe session so local Alpha changes propagate to remote Beta, while remote changes cannot overwrite the local repository.
 It refuses to create a session unless:
 
 - the current directory belongs to a Git repository;
 - the matching remote path is itself a Git repository root;
-- neither working tree contains modified, untracked, or ignored files;
+- neither working tree contains modified or untracked files;
 - both repositories are on the same commit;
 - neither the generated session name nor the local repository already belongs to another Mutagen session.
 
