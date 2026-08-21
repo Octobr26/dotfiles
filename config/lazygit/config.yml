@@ -2,7 +2,7 @@ customCommands:
   - key: "P"
     context: "worktrees"
     description: "Preview worktree on configured port"
-    command: "worktree-preview use {{.SelectedWorktree.branch | quote}}"
+    command: "worktree-preview use {{.SelectedWorktree.Branch | quote}}"
     loadingText: "Switching frontend preview"
     output: "terminal"
   - key: "X"

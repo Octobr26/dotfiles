@@ -54,6 +54,8 @@ Raise the review budget when a material assumption remains unresolved or verific
 Investigate local instructions, code, configuration, current state, and authoritative sources before asking Luis.
 Ask only when the missing answer can materially change acceptance criteria, user-visible behavior, scope, risk, authority, external effects, irreversibility, or cost, and no clearly superior safe reversible default exists.
 
+Treat an unresolved choice as material when it changes the user experience, interaction mode, permissions, side effects, or recovery path, even if the implementation itself is small. Ask before acting when plausible choices are not clearly interchangeable. Do not use live user state to discover requirements by iteration.
+
 Otherwise choose in this order: correctness and safety, explicit acceptance criteria, established local pattern, smallest reversible scope, then speed and token cost.
 State the assumption and meaningful tradeoff briefly.
 

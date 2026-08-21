@@ -300,6 +300,48 @@ load_environment_files() {
 
 }
 
+maybe_configure_default_environment_file() {
+    local env_file=".env"
+    local repo_relative_file
+    local response
+    local auto_env
+
+    [[ ${#ENV_FILES[@]} -eq 0 ]] || return 0
+    auto_env=$(config_get worktreePreview.autoEnv)
+    [[ "$auto_env" != "false" ]] || return 0
+    [[ -f "$MAIN_APP/$env_file" ]] || return 0
+
+    if [[ "$APP_DIR" == "." ]]; then
+        repo_relative_file="$env_file"
+    else
+        repo_relative_file="$APP_DIR/$env_file"
+    fi
+    git -C "$TARGET_WORKTREE" check-ignore -q -- "$repo_relative_file" || return 0
+
+    printf 'Link %s from the main worktree into preview worktrees? [Y/n] ' "$repo_relative_file" >&2
+    if ! IFS= read -r response; then
+        note "Environment forwarding was not configured (no response received)"
+        return 0
+    fi
+
+    case "$response" in
+        "" | [Yy] | [Yy][Ee][Ss])
+            git -C "$REPO_ROOT" config --local --add worktreePreview.envFile "$env_file" ||
+                fail "could not save environment-file preference"
+            ENV_FILES+=("$env_file")
+            note "Will link $repo_relative_file for preview worktrees"
+            ;;
+        [Nn] | [Nn][Oo])
+            git -C "$REPO_ROOT" config --local worktreePreview.autoEnv false ||
+                fail "could not save environment-file preference"
+            note "Environment forwarding disabled for this repository"
+            ;;
+        *)
+            note "Environment forwarding was not configured (answer yes or no next time)"
+            ;;
+    esac
+}
+
 ensure_environment_files() {
     local env_file
     local source_file
@@ -723,6 +765,7 @@ activate_target() {
         pane_is_idle
     fi
 
+    maybe_configure_default_environment_file
     ensure_environment_files
     ensure_dependencies
 

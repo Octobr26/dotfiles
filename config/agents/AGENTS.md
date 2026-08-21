@@ -43,6 +43,12 @@ Keep this file short so it stays useful when loaded into every agent session.
 - Do not add agent names as commit co-authors unless Luis explicitly asks.
 - If writing as Luis or posting on his behalf, ask for or inspect the relevant voice/context first; do not invent personal opinions.
 
+## Connector Account Routing
+
+- For Notion, use `notion-personal` for `Luis Diaz's Notion` (`ldiazcortesf@gmail.com`) and `notion-work` for `Intellimind` (`luis.diaz@intellimind.com`).
+- If Luis does not specify a Notion account and more than one profile could apply, ask which profile to use before making changes.
+- Before any Notion write, fetch the selected profile's `self` identity and stop if its workspace or email does not match the expected profile.
+
 ## File Hygiene
 
 - Do not manually edit generated files, lockfiles, changelogs, or vendor output unless the project instructions or task require it.
