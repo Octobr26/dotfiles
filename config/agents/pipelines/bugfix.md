@@ -1,6 +1,8 @@
 # Bug-Fix Pipeline
 
-1. Interpreter resolves the exact target, failure path, evidence, and risk.
+1. Interpreter resolves the exact target, failure path, evidence, and risk. If
+   the failure occurs in a shared rule, identify the executable authority,
+   independently deployed consumers, and alternate runtime paths before editing.
 2. Implementer reproduces or inspects the real failure before editing when feasible.
 3. Implementer makes the smallest correction and runs focused existing verification.
 4. Reviewer independently checks the diff, affected path, raw verification, and regression risk before seeing the Implementer's defense.
