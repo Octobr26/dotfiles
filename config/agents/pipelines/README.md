@@ -31,7 +31,7 @@ When multiple routes apply, use the higher-risk route.
 - Use `model-routing.md` for every delegated stage. It selects the provider model and reasoning effort and links to the current first-party evidence snapshot in `model-evidence.md`.
 - Keep one writer per repository, worktree, document, or external record at a time.
 - Parallelize only independent read-only work that can be checked separately.
-- Do not invent test artifacts, fixtures, mocks, snapshots, or verification helpers without the user's approval. Existing checks may be run.
+- For behavior changes with a suitable existing test seam, prefer a focused test-first loop: state the observable behavior and edge cases, add a failing focused test, make it pass with the smallest change, then refactor. Do not add fixtures, mocks, snapshots, or verification helpers unless the user requests them or their necessity is explained and approved.
 - Consensus is not proof. Completion requires satisfied acceptance criteria, meaningful verification, and an evidence-backed disposition for every material finding.
 - Use one challenge-response round by default. A second round is allowed only when the first produces new material evidence or a changed artifact; otherwise adjudicate or stop.
 - Stop after the same material finding survives two correction rounds. Report the evidence and blocker instead of repeating the same attempt.

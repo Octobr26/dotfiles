@@ -12,7 +12,7 @@ Keep this file short so it stays useful when loaded into every agent session.
 - Minimize token spend without weakening correctness: use the least expensive capable model for delegated work, keep task packets compact, and do not fan out overlapping agents.
 - Preserve user work. Inspect `git status` before edits, never revert changes you did not make, and stage or commit only when asked.
 - Verify with the narrowest meaningful check: focused test, lint, typecheck, build, screenshot, CLI output, or manual reproduction.
-- Run existing tests and checks when useful, but do not create or modify tests, fixtures, mock data, snapshots, or verification-only helpers unless Luis requests them or the agent first names the proposed behavior and edge cases and receives approval.
+- For behavior changes with a suitable existing test seam, prefer a focused test-first loop: name the observable behavior and edge cases, make a focused test fail, make it pass with the smallest change, then refactor. Tests must cover meaningful behavior, not implementation detail. Do not add fixtures, mock data, snapshots, or verification-only helpers unless Luis requests them or the agent explains why they are necessary and receives approval.
 - When runtime, deployment, live data, or current tool state matters, verify it directly instead of relying on memory.
 - Classify material claims as `confirmed`, `inferred`, or `unknown`. An unknown needs a verification path and must not silently become a requirement.
 - If blocked, state the exact blocker, what was checked, and the next concrete verification path.
