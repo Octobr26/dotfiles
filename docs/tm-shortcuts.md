@@ -9,6 +9,18 @@
 
 `scripts/tm.local` is ignored by git. Put machine-specific repo names, work paths, and private aliases there.
 
+## Popup Shortcuts
+
+These bindings use `Ctrl-a` as the tmux prefix and open in the focused pane's current directory:
+
+- `Ctrl-a y` opens lazygit.
+- `Ctrl-a Ctrl-s` opens `spotify_player`.
+- `Ctrl-a t` opens a login shell instead of tmux's default clock.
+
+Lazygit and the terminal use 80% of the tmux client's width and height, while `spotify_player` uses 90%.
+Each popup closes when its command exits.
+Change the `-w` and `-h` values in `.tmux.conf` to resize them.
+
 ## Public Launcher Flow
 
 `scripts/tm` defines shared helpers:
