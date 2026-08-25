@@ -14,7 +14,7 @@ import sys
 import tempfile
 import time
 from collections import defaultdict, deque
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Dict, Iterable, List, Optional, Set
 
@@ -41,6 +41,7 @@ PROMPT = re.compile(r"^\s*(?:[›❯▸]\s|\$\s|%\s)")
 COMPLETED = re.compile(r"^\s*[•✓]\s+Done[.!]?", re.IGNORECASE | re.MULTILINE)
 SPINNERS = "⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏"
 MAX_PROJECT_LENGTH = 24
+GIT_ROOT_TTL_SECONDS = 60
 HOOK_COMMAND = "tmux-ai-attention hook"
 SOUND_DISABLED = "off"
 
@@ -165,16 +166,21 @@ def short_name(value: str) -> str:
     return name if len(name) <= MAX_PROJECT_LENGTH else f"{name[:23]}…"
 
 
-def git_root(path: str, cache: Dict[str, str]) -> str:
+def git_root(path: str, cache: Dict[str, tuple[str, float]]) -> str:
     if not path:
         return ""
-    if path not in cache:
-        result = subprocess.run(
-            ["git", "-C", path, "rev-parse", "--show-toplevel"],
-            text=True, capture_output=True,
-        )
-        cache[path] = result.stdout.strip() if result.returncode == 0 else ""
-    return cache[path]
+    now = time.monotonic()
+    cached = cache.get(path)
+    if cached is not None and cached[1] > now:
+        return cached[0]
+
+    result = subprocess.run(
+        ["git", "-C", path, "rev-parse", "--show-toplevel"],
+        text=True, capture_output=True,
+    )
+    root = result.stdout.strip() if result.returncode == 0 else ""
+    cache[path] = (root, now + GIT_ROOT_TTL_SECONDS)
+    return root
 
 
 def sound_notifications_enabled(setting: str) -> bool:
@@ -231,6 +237,7 @@ class Watcher:
     displayed: Dict[str, str]
     windows: Dict[str, str]
     initialized: Set[str]
+    git_roots: Dict[str, tuple[str, float]] = field(default_factory=dict)
 
     def list_panes(self) -> List[Pane]:
         panes = []
@@ -241,11 +248,14 @@ class Watcher:
         return panes
 
     def assign_projects(self, panes: List[Pane]) -> None:
-        cache: Dict[str, str] = {}
+        live_paths = {pane.path for pane in panes if pane.path}
+        for path in set(self.git_roots) - live_paths:
+            self.git_roots.pop(path, None)
+
         by_window: Dict[str, List[str]] = defaultdict(list)
         by_session: Dict[str, List[str]] = defaultdict(list)
         for pane in panes:
-            root = git_root(pane.path, cache)
+            root = git_root(pane.path, self.git_roots)
             if root:
                 by_window[pane.window].append(root)
                 by_session[pane.session].append(root)
@@ -253,7 +263,11 @@ class Watcher:
             candidates = []
             if pane.metadata_project:
                 candidates.append(pane.metadata_project)
-            candidates.extend((git_root(pane.path, cache), *by_window[pane.window], *by_session[pane.session]))
+            candidates.extend((
+                git_root(pane.path, self.git_roots),
+                *by_window[pane.window],
+                *by_session[pane.session],
+            ))
             project_path = next((candidate for candidate in candidates if candidate), "")
             pane.project = short_name(project_path) or short_name(pane.session) or "project"
 

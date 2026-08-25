@@ -2,6 +2,7 @@ import importlib.util
 import sys
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 
 SCRIPT = Path(__file__).parents[1] / "scripts" / "tmux-ai-attention.py"
@@ -45,6 +46,106 @@ class SoundNotificationsTest(unittest.TestCase):
     def test_unset_or_on_keeps_sound_notifications_enabled(self):
         self.assertTrue(MODULE.sound_notifications_enabled(""))
         self.assertTrue(MODULE.sound_notifications_enabled("on"))
+
+
+class GitRootCacheTest(unittest.TestCase):
+    @staticmethod
+    def pane(
+        path: str,
+        *,
+        pane_id: str = "%1",
+        window: str = "@1",
+        metadata_project: str = "",
+    ):
+        return MODULE.Pane(
+            "session",
+            window,
+            pane_id,
+            "123",
+            "zsh",
+            "zsh",
+            path,
+            "shell",
+            "",
+            metadata_project,
+            "",
+            "",
+            "",
+            "",
+        )
+
+    @staticmethod
+    def git_result(args, returncode: int, stdout: str):
+        return MODULE.subprocess.CompletedProcess(args, returncode, stdout, "")
+
+    def test_reuses_git_root_until_the_cache_entry_expires(self):
+        cache = {}
+        result = self.git_result(["git"], 0, "/repo\n")
+
+        with (
+            patch.object(MODULE.subprocess, "run", return_value=result) as run,
+            patch.object(MODULE.time, "monotonic", side_effect=[100.0, 110.0, 161.0]),
+        ):
+            self.assertEqual(MODULE.git_root("/repo/src", cache), "/repo")
+            self.assertEqual(MODULE.git_root("/repo/src", cache), "/repo")
+            self.assertEqual(MODULE.git_root("/repo/src", cache), "/repo")
+
+        self.assertEqual(run.call_count, 2)
+
+    def test_negative_git_result_is_cached_until_expiry(self):
+        cache = {}
+        result = self.git_result(["git"], 1, "")
+
+        with (
+            patch.object(MODULE.subprocess, "run", return_value=result) as run,
+            patch.object(MODULE.time, "monotonic", side_effect=[100.0, 110.0]),
+        ):
+            self.assertEqual(MODULE.git_root("/not-a-repo", cache), "")
+            self.assertEqual(MODULE.git_root("/not-a-repo", cache), "")
+
+        run.assert_called_once()
+
+    def test_changed_paths_resolve_immediately_and_inactive_paths_are_pruned(self):
+        watcher = MODULE.Watcher({}, {}, {}, set())
+        first = self.pane("/repo/first")
+        second = self.pane("/repo/second")
+
+        def resolve(args, **_kwargs):
+            return self.git_result(args, 0, "/repo\n")
+
+        with (
+            patch.object(MODULE.subprocess, "run", side_effect=resolve) as run,
+            patch.object(MODULE.time, "monotonic", return_value=100.0),
+        ):
+            watcher.assign_projects([first])
+            watcher.assign_projects([first])
+            self.assertEqual(run.call_count, 1)
+
+            watcher.assign_projects([second])
+
+        self.assertEqual(run.call_count, 2)
+        self.assertNotIn(first.path, watcher.git_roots)
+        self.assertIn(second.path, watcher.git_roots)
+
+    def test_project_selection_keeps_metadata_and_window_root_priority(self):
+        watcher = MODULE.Watcher({}, {}, {}, set())
+        preferred = self.pane(
+            "/repo/src", pane_id="%1", metadata_project="/chosen/project"
+        )
+        window_peer = self.pane("/not-a-repo", pane_id="%2")
+
+        def resolve(args, **_kwargs):
+            root = "/repo" if args[2] == "/repo/src" else ""
+            return self.git_result(args, 0 if root else 1, f"{root}\n" if root else "")
+
+        with (
+            patch.object(MODULE.subprocess, "run", side_effect=resolve),
+            patch.object(MODULE.time, "monotonic", return_value=100.0),
+        ):
+            watcher.assign_projects([preferred, window_peer])
+
+        self.assertEqual(preferred.project, "project")
+        self.assertEqual(window_peer.project, "repo")
 
 
 if __name__ == "__main__":
