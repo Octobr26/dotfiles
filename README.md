@@ -101,6 +101,11 @@ source "/path/to/dotfiles/zsh_stuff"
 
 `zsh_stuff` also keeps `scripts/` and `$HOME/.local/bin` in PATH when sourced directly.
 
+## Theme
+
+Ghostty, tmux, Neovim, Atuin, and bat use Gruvbox Dark.
+Lazygit, Starship, and fzf inherit the current terminal's ANSI palette rather than maintaining duplicate theme definitions.
+
 ## tm Shortcuts
 
 `scripts/tm` is public and generic. It supports `tm <path>` for any project directory, and it loads ignored private shortcuts from `scripts/tm.local` when that file exists.
