@@ -1,0 +1,98 @@
+"$schema" = "https://starship.rs/config-schema.json"
+
+add_newline = false
+palette = "gruvbox_dark"
+
+format = """
+[](fg:blue)$os$username\
+[](fg:blue bg:orange)\
+$directory$git_branch$git_status\
+[](fg:orange bg:aqua)\
+$nodejs$php$python$time\
+[](fg:aqua)\
+$line_break\
+$character"""
+
+[palettes.gruvbox_dark]
+dark = "#282828"
+light = "#ebdbb2"
+blue = "#83a598"
+orange = "#fe8019"
+yellow = "#fabd2f"
+aqua = "#8ec07c"
+purple = "#d3869b"
+green = "#b8bb26"
+red = "#fb4934"
+
+[os]
+disabled = false
+format = "[  $symbol](fg:dark bg:blue)"
+
+[os.symbols]
+Macos = ""
+Linux = "󰌽"
+Windows = "󰍲"
+
+[username]
+show_always = true
+style_user = "fg:dark bg:blue"
+style_root = "fg:light bg:red"
+format = "[ $user ]($style)"
+
+[directory]
+style = "fg:dark bg:orange"
+format = "[   $path ]($style)"
+truncation_length = 3
+truncation_symbol = ""
+
+[directory.substitutions]
+"Documents" = "󰈙 "
+"Downloads" = " "
+"Music" = "󰝚 "
+"Pictures" = " "
+"Developer" = "󰲋 "
+
+[git_branch]
+symbol = ""
+format = "[$symbol $branch ](fg:dark bg:orange)"
+
+[git_status]
+format = "[$all_status$ahead_behind ](fg:dark bg:orange)"
+conflicted = "="
+ahead = "⇡"
+behind = "⇣"
+diverged = "⇕"
+untracked = "?"
+stashed = "$"
+modified = "!"
+staged = "+"
+renamed = "»"
+deleted = "✘"
+
+[nodejs]
+symbol = "⬢"
+format = "[ $symbol( $version)](fg:dark bg:aqua)"
+
+[php]
+symbol = "🐘"
+format = "[ $symbol( $version)](fg:dark bg:aqua)"
+
+[python]
+symbol = "🐍"
+format = '[ $symbol( $version)( \($virtualenv\))](fg:dark bg:aqua)'
+
+[time]
+disabled = false
+time_format = "%I:%M %p"
+format = "[    $time ](fg:dark bg:aqua)"
+
+[line_break]
+disabled = false
+
+[character]
+success_symbol = "[❯](bold fg:green) "
+error_symbol = "[❯](bold fg:red) "
+vimcmd_symbol = "[❮](bold fg:green) "
+vimcmd_replace_one_symbol = "[❮](bold fg:purple) "
+vimcmd_replace_symbol = "[❮](bold fg:purple) "
+vimcmd_visual_symbol = "[❮](bold fg:yellow) "

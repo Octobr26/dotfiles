@@ -14,6 +14,7 @@ Personal shell and terminal setup.
 - `.tmux.conf`
 - `config/nvim`
 - `config/atuin`
+- `config/starship/starship.toml`
 - `config/git/ignore`
 - `config/ghostty/config.ghostty`
 - `config/lazygit/config.yml`
@@ -103,8 +104,8 @@ source "/path/to/dotfiles/zsh_stuff"
 
 ## Theme
 
-Ghostty, tmux, Neovim, Atuin, and bat use Gruvbox Dark.
-Lazygit, Starship, and fzf inherit the current terminal's ANSI palette rather than maintaining duplicate theme definitions.
+Ghostty, tmux, Neovim, Atuin, Starship, and bat use Gruvbox Dark.
+Lazygit and fzf inherit the current terminal's ANSI palette rather than maintaining duplicate theme definitions.
 
 ## tm Shortcuts
 
@@ -184,6 +185,7 @@ See `docs/mutagen-remote-workflow.md` for the safety checks, endpoint mapping, a
 ~/.config/nvim -> ~/dev/dotfiles/config/nvim
 ~/.config/atuin -> ~/dev/dotfiles/config/atuin
 ~/.config/git/ignore -> ~/dev/dotfiles/config/git/ignore
+~/.config/starship.toml -> ~/dev/dotfiles/config/starship/starship.toml
 ~/Library/Application Support/com.mitchellh.ghostty/config.ghostty -> ~/dev/dotfiles/config/ghostty/config.ghostty
 ~/Library/Application Support/lazygit/config.yml -> ~/dev/dotfiles/config/lazygit/config.yml
 ```

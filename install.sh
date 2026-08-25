@@ -319,6 +319,7 @@ link_common_configs() {
     link_file "$DOTFILES_DIR/config/nvim" "$HOME/.config/nvim"
     link_file "$DOTFILES_DIR/config/atuin" "$HOME/.config/atuin"
     link_file "$DOTFILES_DIR/config/git/ignore" "$HOME/.config/git/ignore"
+    link_file "$DOTFILES_DIR/config/starship/starship.toml" "$HOME/.config/starship.toml"
 }
 
 link_macos_configs() {
@@ -341,6 +342,7 @@ link_windows_configs() {
     link_file "$DOTFILES_DIR/config/git/ignore" "$HOME/.config/git/ignore"
     link_file "$DOTFILES_DIR/config/nvim" "$local_app_data/nvim"
     link_file "$DOTFILES_DIR/config/lazygit/config.yml" "$roaming_app_data/lazygit/config.yml"
+    link_file "$DOTFILES_DIR/config/starship/starship.toml" "$HOME/.config/starship.toml"
 }
 
 link_agent_instructions() {
