@@ -80,6 +80,7 @@ The installer detects `macos`, `linux`, `wsl`, or `windows`.
 - links `.ignore` to `~/.ignore`
 - links global agent instructions through `~/AGENTS.md` for Codex and Claude entrypoints
 - merges tmux lifecycle handlers into `~/.codex/hooks.json` and `~/.claude/settings.json` without replacing other hooks
+- requires Python 3.9 or newer for the tmux AI attention watcher and hook merger
 - links the universal Claude pipeline agents individually under `~/.claude/agents/`
 - macOS/Linux/WSL: links `.tmux.conf`
 - macOS: links Ghostty and lazygit from their `~/Library/Application Support/...` locations
@@ -113,15 +114,24 @@ cp scripts/tm.local.example scripts/tm.local
 
 Then edit `scripts/tm.local`. See `docs/tm-shortcuts.md` for the shortcut contract and an AI prompt you can reuse on another machine.
 
+List running Codex and Claude panes, or jump to one by list number, exact tmux target, pane ID, or unique text match:
+
+```sh
+tm agent list
+tm agent jump 1
+```
+
 ## AI Attention in tmux
 
 `scripts/tmux-ai-attention` keeps each pane's always-visible header current with its pane number, tool, optional role, and AI attention state; the focused project appears once in the top status bar.
-The active pane uses a peach header and border; AI window tabs retain their aggregate working, input, and done markers.
-It starts automatically from `.tmux.conf` and only sounds for background windows.
+The active pane uses a peach header and border.
+Pane headers show `! INPUT`, `● working`, `✓ done`, or `○ idle`; AI window tabs aggregate those states as `!` for input, `●` for working, and `✓` when no pane needs attention.
+It starts automatically from `.tmux.conf` and only sounds for background panes when they transition to input or done.
 Codex and Claude state comes from supported JSON lifecycle hooks; `Stop` and `SubagentStop` mark the pane done, while their corresponding start events mark it working.
+These are attention states, not proof that a model is actively generating or that all background work has finished.
 Visible-screen matching remains only as a compatibility fallback for older or unhooked panes.
 Codex asks once to review newly installed hooks; after they are trusted, new Codex panes use structured state automatically.
-Use `tmux-ai-attention once` to inspect a poll without writing tmux state, or `tmux-ai-attention test` to verify the notification sounds.
+Use `tmux-ai-attention test` to verify the notification sounds.
 `Ctrl-a a` opens tmux's window picker.
 `Ctrl-a R` sets an optional role such as `implement`, `review`, or `commands` on the focused pane; submit a blank role to hide it.
 
