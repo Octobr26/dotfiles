@@ -17,3 +17,7 @@ config/atuin/key
 config/atuin/session
 config/atuin/*.db
 scripts/tm.local
+
+# Python bytecode cache
+__pycache__/
+*.pyc
