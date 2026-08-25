@@ -72,14 +72,16 @@ set_agent_metadata() {
 create_ai_window() {
     local session_name=$1
     local project_dir=$2
+    local claude_pane
+    local codex_pane
 
-    tmux new-window -t "$session_name" -n ai -c "$project_dir"
-    tmux split-window -v -t "$session_name:ai.0" -c "$project_dir"
-    set_agent_metadata "$session_name:ai.0" claude "$project_dir" "Claude agent"
-    set_agent_metadata "$session_name:ai.1" codex "$project_dir" "Codex agent"
-    tmux send-keys -t "$session_name:ai.0" 'claude' C-m
-    tmux send-keys -t "$session_name:ai.1" 'codex' C-m
-    tmux select-pane -t "$session_name:ai.0"
+    claude_pane=$(tmux new-window -P -F '#{pane_id}' -t "$session_name" -n ai -c "$project_dir")
+    codex_pane=$(tmux split-window -P -F '#{pane_id}' -v -t "$claude_pane" -c "$project_dir")
+    set_agent_metadata "$claude_pane" claude "$project_dir" "Claude agent"
+    set_agent_metadata "$codex_pane" codex "$project_dir" "Codex agent"
+    tmux send-keys -t "$claude_pane" 'claude' C-m
+    tmux send-keys -t "$codex_pane" 'codex' C-m
+    tmux select-pane -t "$claude_pane"
 }
 
 agent_kind_from_text() {
@@ -162,11 +164,11 @@ collect_agent_rows() {
     local pane_rows
     local format
     local session_name window_index pane_index pane_id pane_pid
-    local current_command start_command current_path pane_title window_state
-    local metadata_kind metadata_role metadata_project metadata_title
+    local current_command start_command current_path pane_title pane_state
+    local metadata_kind metadata_role pane_project metadata_title
     local kind state_rank project_path project_name label target
 
-    format="#{session_name}${agent_row_separator}#{window_index}${agent_row_separator}#{pane_index}${agent_row_separator}#{pane_id}${agent_row_separator}#{pane_pid}${agent_row_separator}#{pane_current_command}${agent_row_separator}#{pane_start_command}${agent_row_separator}#{pane_current_path}${agent_row_separator}#{pane_title}${agent_row_separator}#{@ai_state}${agent_row_separator}#{@agent_kind}${agent_row_separator}#{@agent_role}${agent_row_separator}#{@agent_project}${agent_row_separator}#{@agent_title}"
+    format="#{session_name}${agent_row_separator}#{window_index}${agent_row_separator}#{pane_index}${agent_row_separator}#{pane_id}${agent_row_separator}#{pane_pid}${agent_row_separator}#{pane_current_command}${agent_row_separator}#{pane_start_command}${agent_row_separator}#{pane_current_path}${agent_row_separator}#{pane_title}${agent_row_separator}#{@pane_state}${agent_row_separator}#{@agent_kind}${agent_row_separator}#{@agent_role}${agent_row_separator}#{@pane_project}${agent_row_separator}#{@agent_title}"
 
     if ! pane_rows=$(tmux list-panes -a -F "$format" 2>/dev/null); then
         echo "Unable to read tmux panes. Is the tmux server running?" >&2
@@ -175,14 +177,14 @@ collect_agent_rows() {
 
     agent_process_snapshot=$(ps -axo pid=,ppid=,command= 2>/dev/null || true)
 
-    while IFS="$agent_row_separator" read -r session_name window_index pane_index pane_id pane_pid current_command start_command current_path pane_title window_state metadata_kind metadata_role metadata_project metadata_title; do
+    while IFS="$agent_row_separator" read -r session_name window_index pane_index pane_id pane_pid current_command start_command current_path pane_title pane_state metadata_kind metadata_role pane_project metadata_title; do
         [ -n "$pane_id" ] || continue
 
         kind=$(agent_kind_for_pane "$metadata_kind" "$pane_pid" "$current_command" "$start_command" || true)
         [ -n "$kind" ] || continue
 
-        window_state=${window_state:-idle}
-        case "$window_state" in
+        pane_state=${pane_state:-idle}
+        case "$pane_state" in
             blocked)
                 state_rank=0
                 ;;
@@ -194,7 +196,7 @@ collect_agent_rows() {
                 ;;
         esac
 
-        project_path=${metadata_project:-$current_path}
+        project_path=${pane_project:-$current_path}
         project_name=$(basename "$project_path")
         target="$session_name:$window_index.$pane_index"
 
@@ -213,7 +215,7 @@ collect_agent_rows() {
             "$(sanitize_agent_field "$target")" "$agent_row_separator" \
             "$(sanitize_agent_field "$pane_id")" "$agent_row_separator" \
             "$(sanitize_agent_field "$kind")" "$agent_row_separator" \
-            "$(sanitize_agent_field "$window_state")" "$agent_row_separator" \
+            "$(sanitize_agent_field "$pane_state")" "$agent_row_separator" \
             "$(sanitize_agent_field "$project_name")" "$agent_row_separator" \
             "$(sanitize_agent_field "$current_path")" "$agent_row_separator" \
             "$(sanitize_agent_field "$label")" "$agent_row_separator" \

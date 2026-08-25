@@ -33,11 +33,23 @@ case "${1:-}" in
         ;;
     list-panes)
         separator=$(printf '\037')
-        printf '%s\n' "app${separator}4${separator}1${separator}%9${separator}9001${separator}codex${separator}${separator}$HOME/work/example-app${separator}Codex agent${separator}blocked${separator}codex${separator}agent${separator}$HOME/work/example-app${separator}Codex agent"
-        printf '%s\n' "app${separator}4${separator}0${separator}%8${separator}9000${separator}claude${separator}${separator}$HOME/work/example-app${separator}Claude agent${separator}working${separator}claude${separator}agent${separator}$HOME/work/example-app${separator}Claude agent"
+        printf '%s\n' "app${separator}4${separator}2${separator}%9${separator}9001${separator}codex${separator}${separator}$HOME/work/example-app${separator}Codex agent${separator}blocked${separator}codex${separator}agent${separator}example-api${separator}Codex agent"
+        printf '%s\n' "app${separator}4${separator}1${separator}%8${separator}9000${separator}claude${separator}${separator}$HOME/work/example-app${separator}Claude agent${separator}working${separator}claude${separator}agent${separator}example-web${separator}Claude agent"
         exit 0
         ;;
-    attach-session|switch-client|new-session|new-window|split-window|send-keys|select-pane|select-window|set-option)
+    new-window)
+        if [[ " $* " == *" -P "* ]]; then
+            printf '%%41\n'
+        fi
+        exit 0
+        ;;
+    split-window)
+        if [[ " $* " == *" -P "* ]]; then
+            printf '%%42\n'
+        fi
+        exit 0
+        ;;
+    attach-session|switch-client|new-session|send-keys|select-pane|select-window|set-option)
         exit 0
         ;;
 esac
@@ -100,13 +112,14 @@ assert_file_contains "$TMUX_LOG" "new-window -t app -n git -c $HOME/work/example
 assert_file_contains "$TMUX_LOG" "send-keys -t app:git lg C-m" "local shortcut starts lazygit"
 assert_file_contains "$TMUX_LOG" "new-window -t app -n code -c $HOME/work/example-app" "local shortcut creates neovim window"
 assert_file_contains "$TMUX_LOG" "send-keys -t app:code nvim C-m" "local shortcut starts neovim"
-assert_file_contains "$TMUX_LOG" "new-window -t app -n ai -c $HOME/work/example-app" "local shortcut creates ai window"
-assert_file_contains "$TMUX_LOG" "send-keys -t app:ai.0 claude C-m" "local shortcut starts claude in ai window"
-assert_file_contains "$TMUX_LOG" "send-keys -t app:ai.1 codex C-m" "local shortcut starts codex in ai window"
-assert_file_contains "$TMUX_LOG" "set-option -p -t app:ai.0 @agent_kind claude" "claude pane receives stable agent metadata"
-assert_file_contains "$TMUX_LOG" "set-option -p -t app:ai.1 @agent_kind codex" "codex pane receives stable agent metadata"
-assert_file_contains "$TMUX_LOG" "select-pane -t app:ai.0 -T Claude agent" "claude pane receives a stable title"
-assert_file_contains "$TMUX_LOG" "select-pane -t app:ai.1 -T Codex agent" "codex pane receives a stable title"
+assert_file_contains "$TMUX_LOG" "new-window -P -F #{pane_id} -t app -n ai -c $HOME/work/example-app" "local shortcut captures the first AI pane id"
+assert_file_contains "$TMUX_LOG" "split-window -P -F #{pane_id} -v -t %41 -c $HOME/work/example-app" "local shortcut captures the second AI pane id"
+assert_file_contains "$TMUX_LOG" "send-keys -t %41 claude C-m" "local shortcut starts claude in its pane"
+assert_file_contains "$TMUX_LOG" "send-keys -t %42 codex C-m" "local shortcut starts codex in its pane"
+assert_file_contains "$TMUX_LOG" "set-option -p -t %41 @agent_kind claude" "claude pane receives stable agent metadata"
+assert_file_contains "$TMUX_LOG" "set-option -p -t %42 @agent_kind codex" "codex pane receives stable agent metadata"
+assert_file_contains "$TMUX_LOG" "select-pane -t %41 -T Claude agent" "claude pane receives a stable title"
+assert_file_contains "$TMUX_LOG" "select-pane -t %42 -T Codex agent" "codex pane receives a stable title"
 assert_file_contains "$TMUX_LOG" "select-window -t app:git" "local shortcut opens on git window"
 assert_file_contains "$TMUX_LOG" "attach-session -t =app" "local shortcut attaches session"
 
@@ -115,7 +128,7 @@ first_agent=$(printf '%s\n' "$agent_list" | sed -n '2p')
 second_agent=$(printf '%s\n' "$agent_list" | sed -n '3p')
 
 case "$first_agent" in
-    *blocked*codex*app:4.1*example-app*"agent / Codex agent"*) ;;
+    *blocked*codex*app:4.2*example-api*"agent / Codex agent"*) ;;
     *)
         printf 'not ok: blocked Codex pane is listed first\n%s\n' "$agent_list" >&2
         exit 1
@@ -123,7 +136,7 @@ case "$first_agent" in
 esac
 
 case "$second_agent" in
-    *working*claude*app:4.0*example-app*"agent / Claude agent"*) ;;
+    *working*claude*app:4.1*example-web*"agent / Claude agent"*) ;;
     *)
         printf 'not ok: working Claude pane is listed second\n%s\n' "$agent_list" >&2
         exit 1
