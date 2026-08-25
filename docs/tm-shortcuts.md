@@ -4,6 +4,8 @@
 
 - `tm <path>` opens a generic project session for any directory.
 - `tm <shortcut>` can call private shortcuts from `scripts/tm.local`.
+- `tm agent list` inventories running Codex and Claude panes across tmux.
+- `tm agent jump <selector>` moves to one of those panes.
 
 `scripts/tm.local` is ignored by git. Put machine-specific repo names, work paths, and private aliases there.
 
@@ -114,6 +116,33 @@ create_app_session() {
 ```
 
 Keep real client names, private paths, and one-off workflow commands in `scripts/tm.local`.
+
+## Agent Navigator
+
+The navigator uses the existing tmux server; it does not create another session runtime or store transcripts.
+You normally do not need it: every pane border updates automatically with the pane number, tool, optional role, and pane-local AI state, while the focused project appears once in the top status bar.
+The focused pane has a peach header and border, and `Ctrl-a R` sets or clears its optional role.
+Codex supplies state through JSON lifecycle hooks, so `working`, `INPUT`, and `done` do not depend on matching its rendered text.
+Claude and Codex sessions that were already running before the hooks loaded use the visible-pane fallback until restarted.
+
+```sh
+tm agent list
+tm agent jump 1
+tm agent jump app:4.1
+tm agent jump %9
+tm agent jump example-app
+```
+
+The list includes each pane's `session:window.pane` target, Codex or Claude kind, attention state, project, current working directory, and role/title.
+Blocked agents sort first, then working agents, then done or idle agents.
+
+Use the list number or exact target for deterministic jumps.
+A text selector is also accepted when it matches exactly one agent; ambiguous matches print the candidates instead of guessing.
+Jumping switches the current client when run inside tmux and attaches to the target session when run outside tmux.
+
+New AI panes made by `create_ai_window` receive stable tmux metadata.
+Existing or manually created panes are labeled from their running command and nearby project panes, so they do not need to be recreated.
+`tm agent list` remains useful as a diagnostic or cross-session inventory.
 
 ## Worktree Frontend Preview
 

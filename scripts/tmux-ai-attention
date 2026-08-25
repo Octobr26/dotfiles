@@ -1,0 +1,15 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+script_dir=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
+python_candidates=(python3.14 python3.13 python3.12 python3.11 python3)
+
+for python in "${python_candidates[@]}"; do
+    command -v "$python" >/dev/null 2>&1 || continue
+    if "$python" -c 'import sys; raise SystemExit(sys.version_info < (3, 9))'; then
+        exec "$python" "$script_dir/tmux-ai-attention.py" "$@"
+    fi
+done
+
+printf '%s\n' 'tmux-ai-attention requires Python 3.9 or newer' >&2
+exit 127

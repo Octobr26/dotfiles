@@ -17,7 +17,9 @@ This repo is personal shell and terminal setup. Keep changes narrow and preserve
 - worktree frontend preview: `scripts/worktree-preview`
 - tmux private shortcut example: `scripts/tm.local.example`
 - tmux shortcut guide: `docs/tm-shortcuts.md`
-- tmux AI status helper: `scripts/tmux-ai-window-status`
+- tmux AI attention watcher: `scripts/tmux-ai-attention`
+- Codex lifecycle hooks: `config/codex/tmux-hooks.json`
+- Claude lifecycle hooks: `config/claude/tmux-hooks.json`
 - Ghostty config: `config/ghostty/config.ghostty`
 - Global agent instructions: `config/agents/AGENTS.md`
 - Universal agent pipelines: `config/agents/pipelines/README.md`

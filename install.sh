@@ -74,6 +74,7 @@ managed_tools_for_os() {
     if tool_status_should_include spotify_player DOTFILES_INSTALL_SPOTIFY_PLAYER; then
         printf '%s\n' spotify_player
     fi
+
 }
 
 env_flag_enabled() {
@@ -355,6 +356,11 @@ link_agent_instructions() {
     link_file "$DOTFILES_DIR/config/claude/agents/pipeline-skeptic.md" "$HOME/.claude/agents/pipeline-skeptic.md"
     link_file "$DOTFILES_DIR/config/claude/agents/pipeline-adjudicator.md" "$HOME/.claude/agents/pipeline-adjudicator.md"
     link_file "$DOTFILES_DIR/config/claude/agents/pipeline-deep-agent.md" "$HOME/.claude/agents/pipeline-deep-agent.md"
+}
+
+install_tmux_ai_hooks() {
+    TMUX_HOOKS_BACKUP_DIR="$BACKUP_DIR" "$DOTFILES_DIR/scripts/tmux-ai-attention" install-hooks codex
+    TMUX_HOOKS_BACKUP_DIR="$BACKUP_DIR" "$DOTFILES_DIR/scripts/tmux-ai-attention" install-hooks claude
 }
 
 print_missing() {
@@ -1292,6 +1298,7 @@ install_optional_tools() {
     if optional_tool_enabled DOTFILES_INSTALL_SPOTIFY_PLAYER "spotify_player" "Install spotify_player?"; then
         install_spotify_player "$os_name"
     fi
+
 }
 
 install_packages_for_os() {
@@ -1456,6 +1463,7 @@ main() {
             fi
             ensure_zsh_setup
             link_agent_instructions
+            install_tmux_ai_hooks
             link_file "$DOTFILES_DIR/.ignore" "$HOME/.ignore"
             link_file "$DOTFILES_DIR/.tmux.conf" "$HOME/.tmux.conf"
             if [ "$os_name" = "macos" ]; then

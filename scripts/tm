@@ -3,6 +3,8 @@ set -euo pipefail
 
 script_dir=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 local_config="${TM_LOCAL_CONFIG:-$script_dir/tm.local}"
+agent_row_separator=$'\037'
+agent_process_snapshot=""
 
 usage() {
     local local_usage=""
@@ -12,11 +14,17 @@ usage() {
     fi
 
     if [ -n "$local_usage" ]; then
-        echo "Usage: $(basename "$0") $local_usage|<relative-or-absolute-path>"
+        echo "Usage: $(basename "$0") agent <list|jump>|$local_usage|<relative-or-absolute-path>"
     else
-        echo "Usage: $(basename "$0") <relative-or-absolute-path>"
+        echo "Usage: $(basename "$0") agent <list|jump>|<relative-or-absolute-path>"
     fi
     echo "Add private shortcuts in scripts/tm.local."
+    exit 1
+}
+
+agent_usage() {
+    echo "Usage: $(basename "$0") agent list"
+    echo "       $(basename "$0") agent jump <number|session:window.pane|pane-id|search>"
     exit 1
 }
 
@@ -49,15 +57,290 @@ safe_session_name_from_path() {
     fi
 }
 
+set_agent_metadata() {
+    local target=$1
+    local kind=$2
+    local project_dir=$3
+    local title=$4
+
+    tmux set-option -p -t "$target" @agent_kind "$kind"
+    tmux set-option -p -t "$target" @agent_project "$project_dir"
+    tmux set-option -p -t "$target" @agent_title "$title"
+    tmux select-pane -t "$target" -T "$title"
+}
+
 create_ai_window() {
     local session_name=$1
     local project_dir=$2
 
     tmux new-window -t "$session_name" -n ai -c "$project_dir"
     tmux split-window -v -t "$session_name:ai.0" -c "$project_dir"
+    set_agent_metadata "$session_name:ai.0" claude "$project_dir" "Claude agent"
+    set_agent_metadata "$session_name:ai.1" codex "$project_dir" "Codex agent"
     tmux send-keys -t "$session_name:ai.0" 'claude' C-m
     tmux send-keys -t "$session_name:ai.1" 'codex' C-m
     tmux select-pane -t "$session_name:ai.0"
+}
+
+agent_kind_from_text() {
+    local text=$1
+    local lower
+
+    lower=$(printf '%s' "$text" | tr '[:upper:]' '[:lower:]')
+
+    if [[ "$lower" =~ (^|[[:space:]/])claude([[:space:]/.]|$) ]]; then
+        echo "claude"
+    elif [[ "$lower" =~ (^|[[:space:]/])codex([[:space:]/.]|$) ]]; then
+        echo "codex"
+    else
+        return 1
+    fi
+}
+
+descendant_commands() {
+    local pane_pid=$1
+
+    printf '%s\n' "$agent_process_snapshot" | awk -v root="$pane_pid" '
+        {
+            pid = $1
+            parent[pid] = $2
+            $1 = ""
+            $2 = ""
+            sub(/^[[:space:]]+/, "")
+            command[pid] = $0
+        }
+        END {
+            for (pid in parent) {
+                current = pid
+                depth = 0
+                while (current != "" && current != "0" && current != root && depth < 64) {
+                    current = parent[current]
+                    depth++
+                }
+                if (current == root) {
+                    print command[pid]
+                }
+            }
+        }
+    '
+}
+
+agent_kind_for_pane() {
+    local metadata_kind=$1
+    local pane_pid=$2
+    local current_command=$3
+    local start_command=$4
+    local kind
+    local process_commands
+
+    case "$metadata_kind" in
+        claude|codex)
+            echo "$metadata_kind"
+            return 0
+            ;;
+    esac
+
+    kind=$(agent_kind_from_text "$current_command $start_command" || true)
+    if [ -n "$kind" ]; then
+        echo "$kind"
+        return 0
+    fi
+
+    process_commands=$(descendant_commands "$pane_pid")
+    agent_kind_from_text "$process_commands"
+}
+
+sanitize_agent_field() {
+    local value=$1
+
+    value=${value//$'\n'/ }
+    value=${value//$agent_row_separator/ }
+    printf '%s' "$value"
+}
+
+collect_agent_rows() {
+    local pane_rows
+    local format
+    local session_name window_index pane_index pane_id pane_pid
+    local current_command start_command current_path pane_title window_state
+    local metadata_kind metadata_role metadata_project metadata_title
+    local kind state_rank project_path project_name label target
+
+    format="#{session_name}${agent_row_separator}#{window_index}${agent_row_separator}#{pane_index}${agent_row_separator}#{pane_id}${agent_row_separator}#{pane_pid}${agent_row_separator}#{pane_current_command}${agent_row_separator}#{pane_start_command}${agent_row_separator}#{pane_current_path}${agent_row_separator}#{pane_title}${agent_row_separator}#{@ai_state}${agent_row_separator}#{@agent_kind}${agent_row_separator}#{@agent_role}${agent_row_separator}#{@agent_project}${agent_row_separator}#{@agent_title}"
+
+    if ! pane_rows=$(tmux list-panes -a -F "$format" 2>/dev/null); then
+        echo "Unable to read tmux panes. Is the tmux server running?" >&2
+        return 1
+    fi
+
+    agent_process_snapshot=$(ps -axo pid=,ppid=,command= 2>/dev/null || true)
+
+    while IFS="$agent_row_separator" read -r session_name window_index pane_index pane_id pane_pid current_command start_command current_path pane_title window_state metadata_kind metadata_role metadata_project metadata_title; do
+        [ -n "$pane_id" ] || continue
+
+        kind=$(agent_kind_for_pane "$metadata_kind" "$pane_pid" "$current_command" "$start_command" || true)
+        [ -n "$kind" ] || continue
+
+        window_state=${window_state:-idle}
+        case "$window_state" in
+            blocked)
+                state_rank=0
+                ;;
+            working)
+                state_rank=1
+                ;;
+            *)
+                state_rank=2
+                ;;
+        esac
+
+        project_path=${metadata_project:-$current_path}
+        project_name=$(basename "$project_path")
+        target="$session_name:$window_index.$pane_index"
+
+        if [ -n "$metadata_role" ] && [ -n "$metadata_title" ]; then
+            label="$metadata_role / $metadata_title"
+        elif [ -n "$metadata_role" ]; then
+            label=$metadata_role
+        elif [ -n "$metadata_title" ]; then
+            label=$metadata_title
+        else
+            label=${pane_title:-$kind}
+        fi
+
+        printf '%s%s%s%s%s%s%s%s%s%s%s%s%s%s%s%s%s%s%s%s%s\n' \
+            "$state_rank" "$agent_row_separator" \
+            "$(sanitize_agent_field "$target")" "$agent_row_separator" \
+            "$(sanitize_agent_field "$pane_id")" "$agent_row_separator" \
+            "$(sanitize_agent_field "$kind")" "$agent_row_separator" \
+            "$(sanitize_agent_field "$window_state")" "$agent_row_separator" \
+            "$(sanitize_agent_field "$project_name")" "$agent_row_separator" \
+            "$(sanitize_agent_field "$current_path")" "$agent_row_separator" \
+            "$(sanitize_agent_field "$label")" "$agent_row_separator" \
+            "$(sanitize_agent_field "$session_name")" "$agent_row_separator" \
+            "$(sanitize_agent_field "$window_index")" "$agent_row_separator" \
+            "$(sanitize_agent_field "$pane_index")"
+    done <<< "$pane_rows"
+}
+
+sorted_agent_rows() {
+    collect_agent_rows | LC_ALL=C sort -t "$agent_row_separator" -k1,1n -k2,2
+}
+
+print_agent_rows() {
+    local rows=$1
+    local index=1
+    local rank target pane_id kind state project cwd label session window pane
+
+    if [ -z "$rows" ]; then
+        echo "No Codex or Claude panes found."
+        return 0
+    fi
+
+    printf '%-3s %-8s %-7s %-22s %-18s %-30s %s\n' "#" "STATE" "KIND" "TARGET" "PROJECT" "CWD" "ROLE / TITLE"
+    while IFS="$agent_row_separator" read -r rank target pane_id kind state project cwd label session window pane; do
+        printf '%-3s %-8s %-7s %-22s %-18s %-30s %s\n' "$index" "$state" "$kind" "$target" "$project" "$cwd" "$label"
+        index=$((index + 1))
+    done <<< "$rows"
+}
+
+agent_list() {
+    local rows
+
+    rows=$(sorted_agent_rows)
+    print_agent_rows "$rows"
+}
+
+resolve_agent_selector() {
+    local rows=$1
+    local selector=$2
+    local selector_lower
+    local index=1
+    local rank target pane_id kind state project cwd label session window pane
+    local exact_matches=""
+    local fuzzy_matches=""
+    local searchable
+    local searchable_lower
+    local match_count=0
+
+    if [[ "$selector" =~ ^[0-9]+$ ]]; then
+        while IFS="$agent_row_separator" read -r rank target pane_id kind state project cwd label session window pane; do
+            if [ "$index" -eq "$selector" ]; then
+                printf '%s\n' "$rank$agent_row_separator$target$agent_row_separator$pane_id$agent_row_separator$kind$agent_row_separator$state$agent_row_separator$project$agent_row_separator$cwd$agent_row_separator$label$agent_row_separator$session$agent_row_separator$window$agent_row_separator$pane"
+                return 0
+            fi
+            index=$((index + 1))
+        done <<< "$rows"
+        echo "No agent at list position $selector. Run '$(basename "$0") agent list'." >&2
+        return 1
+    fi
+
+    selector_lower=$(printf '%s' "$selector" | tr '[:upper:]' '[:lower:]')
+    while IFS="$agent_row_separator" read -r rank target pane_id kind state project cwd label session window pane; do
+        if [ "$selector" = "$target" ] || [ "$selector" = "$pane_id" ]; then
+            exact_matches="${exact_matches}${rank}${agent_row_separator}${target}${agent_row_separator}${pane_id}${agent_row_separator}${kind}${agent_row_separator}${state}${agent_row_separator}${project}${agent_row_separator}${cwd}${agent_row_separator}${label}${agent_row_separator}${session}${agent_row_separator}${window}${agent_row_separator}${pane}"$'\n'
+            continue
+        fi
+
+        searchable="$target $pane_id $kind $state $project $cwd $label"
+        searchable_lower=$(printf '%s' "$searchable" | tr '[:upper:]' '[:lower:]')
+        if [[ "$searchable_lower" == *"$selector_lower"* ]]; then
+            fuzzy_matches="${fuzzy_matches}${rank}${agent_row_separator}${target}${agent_row_separator}${pane_id}${agent_row_separator}${kind}${agent_row_separator}${state}${agent_row_separator}${project}${agent_row_separator}${cwd}${agent_row_separator}${label}${agent_row_separator}${session}${agent_row_separator}${window}${agent_row_separator}${pane}"$'\n'
+        fi
+    done <<< "$rows"
+
+    if [ -n "$exact_matches" ]; then
+        printf '%s' "$exact_matches" | sed -n '1p'
+        return 0
+    fi
+
+    if [ -n "$fuzzy_matches" ]; then
+        match_count=$(printf '%s' "$fuzzy_matches" | awk 'NF { count++ } END { print count + 0 }')
+    fi
+
+    if [ "$match_count" -eq 1 ]; then
+        printf '%s' "$fuzzy_matches" | sed -n '1p'
+        return 0
+    fi
+
+    if [ "$match_count" -gt 1 ]; then
+        echo "Selector '$selector' matches multiple agents:" >&2
+        while IFS="$agent_row_separator" read -r rank target pane_id kind state project cwd label session window pane; do
+            [ -n "$target" ] || continue
+            printf '  %s  %-7s %-8s %s\n' "$target" "$kind" "$state" "$label" >&2
+        done <<< "${fuzzy_matches%$'\n'}"
+        echo "Use the list number, exact target, or pane id." >&2
+        return 1
+    fi
+
+    echo "No agent matches '$selector'. Run '$(basename "$0") agent list'." >&2
+    return 1
+}
+
+agent_jump() {
+    local selector=${1:-}
+    local rows selected
+    local rank target pane_id kind state project cwd label session window pane
+
+    [ -n "$selector" ] || agent_usage
+
+    rows=$(sorted_agent_rows)
+    if [ -z "$rows" ]; then
+        echo "No Codex or Claude panes found." >&2
+        return 1
+    fi
+
+    selected=$(resolve_agent_selector "$rows" "$selector")
+    IFS="$agent_row_separator" read -r rank target pane_id kind state project cwd label session window pane <<< "$selected"
+
+    tmux select-window -t "$session:$window"
+    tmux select-pane -t "$pane_id"
+
+    if [ -n "${TMUX:-}" ]; then
+        tmux switch-client -t "=$session"
+    else
+        tmux attach-session -t "=$session"
+    fi
 }
 
 create_project_session() {
@@ -109,6 +392,22 @@ target=${1:-}
 case "$target" in
     "")
         usage
+        ;;
+    agent)
+        agent_action=${2:-}
+        case "$agent_action" in
+            list)
+                [ "$#" -eq 2 ] || agent_usage
+                agent_list
+                ;;
+            jump)
+                [ "$#" -eq 3 ] || agent_usage
+                agent_jump "$3"
+                ;;
+            *)
+                agent_usage
+                ;;
+        esac
         ;;
     *)
         if declare -F tm_local_dispatch >/dev/null 2>&1 && tm_local_dispatch "$target"; then
