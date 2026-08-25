@@ -9,6 +9,8 @@ Keep this file short so it stays useful when loaded into every agent session.
 - Work from the real local context first: current directory, git state, project instructions, README, scripts, configs, and recent memory when relevant.
 - Identify the correct project before editing. Do not mix unrelated repos, clients, or personal projects unless Luis explicitly asks for cross-project work.
 - Prefer the smallest correct change that fits existing patterns. Avoid speculative abstractions, broad rewrites, or unrelated cleanup.
+- Extract recurring or domain-significant literals into clearly named constants or enums; keep self-explanatory one-off values inline.
+- Prefer straightforward control flow, clear domain names, and brief comments for non-obvious constraints or decisions. Defer formatting and language-specific conventions to the target project.
 - Minimize token spend without weakening correctness: use the least expensive capable model for delegated work, keep task packets compact, and do not fan out overlapping agents.
 - Preserve user work. Inspect `git status` before edits, never revert changes you did not make, and stage or commit only when asked.
 - Verify with the narrowest meaningful check: focused test, lint, typecheck, build, screenshot, CLI output, or manual reproduction.
