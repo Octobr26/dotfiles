@@ -160,6 +160,86 @@ sanitize_agent_field() {
     printf '%s' "$value"
 }
 
+shorten_agent_path() {
+    local path=$1
+
+    if [ "$path" = "$HOME" ]; then
+        printf '~'
+    elif [[ "$path" == "$HOME/"* ]]; then
+        printf '~/%s' "${path#"$HOME/"}"
+    else
+        printf '%s' "$path"
+    fi
+}
+
+fit_agent_field() {
+    local width=$1
+    local value=$2
+
+    if [ "${#value}" -gt "$width" ]; then
+        value="${value:0:$((width - 1))}…"
+    fi
+    printf '%s' "$value"
+}
+
+agent_state_display() {
+    case "$1" in
+        blocked)
+            printf '! blocked'
+            ;;
+        working)
+            printf '● working'
+            ;;
+        done)
+            printf '✓ done'
+            ;;
+        *)
+            printf '○ idle'
+            ;;
+    esac
+}
+
+clean_agent_label() {
+    local label=$1
+
+    case "$label" in
+        '⠋ '*|'⠙ '*|'⠹ '*|'⠸ '*|'⠼ '*|'⠴ '*|'⠦ '*|'⠧ '*|'⠇ '*|'⠏ '*|'✳ '*)
+            label=${label#?}
+            label=${label# }
+            ;;
+    esac
+    printf '%s' "$label"
+}
+
+agent_style() {
+    case "$1" in
+        blocked) printf '1;38;2;251;73;70' ;;
+        working) printf '1;38;2;250;189;47' ;;
+        done) printf '1;38;2;184;187;38' ;;
+        idle) printf '38;2;146;131;116' ;;
+        kind) printf '38;2;131;165;152' ;;
+        target) printf '1;38;2;235;219;178' ;;
+        project) printf '38;2;254;128;25' ;;
+        label) printf '38;2;211;134;155' ;;
+        header) printf '1;38;2;235;219;178' ;;
+    esac
+}
+
+print_agent_cell() {
+    local width=$1
+    local value=$2
+    local style=${3:-}
+    local color_code=''
+
+    value=$(fit_agent_field "$width" "$value")
+    if [ -t 1 ] && [ -z "${NO_COLOR:-}" ] && [ -n "$style" ]; then
+        color_code=$(agent_style "$style")
+        printf '\033[%sm%-*s\033[0m' "$color_code" "$width" "$value"
+    else
+        printf '%-*s' "$width" "$value"
+    fi
+}
+
 collect_agent_rows() {
     local pane_rows
     local format
@@ -209,6 +289,7 @@ collect_agent_rows() {
         else
             label=${pane_title:-$kind}
         fi
+        label=$(clean_agent_label "$label")
 
         printf '%s%s%s%s%s%s%s%s%s%s%s%s%s%s%s%s%s%s%s%s%s\n' \
             "$state_rank" "$agent_row_separator" \
@@ -233,15 +314,45 @@ print_agent_rows() {
     local rows=$1
     local index=1
     local rank target pane_id kind state project cwd label session window pane
+    local state_display location
 
     if [ -z "$rows" ]; then
         echo "No Codex or Claude panes found."
         return 0
     fi
 
-    printf '%-3s %-8s %-7s %-22s %-18s %-30s %s\n' "#" "STATE" "KIND" "TARGET" "PROJECT" "CWD" "ROLE / TITLE"
+    print_agent_cell 3 '#' header
+    printf ' '
+    print_agent_cell 12 'STATE' header
+    printf ' '
+    print_agent_cell 7 'KIND' header
+    printf ' '
+    print_agent_cell 14 'TARGET' header
+    printf ' '
+    print_agent_cell 16 'PROJECT' header
+    printf ' '
+    print_agent_cell 30 'LOCATION' header
+    printf ' '
+    print_agent_cell 32 'ROLE / TITLE' header
+    printf '\n'
     while IFS="$agent_row_separator" read -r rank target pane_id kind state project cwd label session window pane; do
-        printf '%-3s %-8s %-7s %-22s %-18s %-30s %s\n' "$index" "$state" "$kind" "$target" "$project" "$cwd" "$label"
+        state_display=$(agent_state_display "$state")
+        location=$(shorten_agent_path "$cwd")
+
+        print_agent_cell 3 "$index"
+        printf ' '
+        print_agent_cell 12 "$state_display" "$state"
+        printf ' '
+        print_agent_cell 7 "$kind" kind
+        printf ' '
+        print_agent_cell 14 "$target" target
+        printf ' '
+        print_agent_cell 16 "$project" project
+        printf ' '
+        print_agent_cell 30 "$location"
+        printf ' '
+        print_agent_cell 32 "$label" label
+        printf '\n'
         index=$((index + 1))
     done <<< "$rows"
 }

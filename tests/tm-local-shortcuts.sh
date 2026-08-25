@@ -128,17 +128,17 @@ first_agent=$(printf '%s\n' "$agent_list" | sed -n '2p')
 second_agent=$(printf '%s\n' "$agent_list" | sed -n '3p')
 
 case "$first_agent" in
-    *blocked*codex*app:4.2*example-api*"agent / Codex agent"*) ;;
+    *blocked*codex*app:4.2*example-api*'~/work/example-app'*"agent / Codex agent"*) ;;
     *)
-        printf 'not ok: blocked Codex pane is listed first\n%s\n' "$agent_list" >&2
+        printf 'not ok: blocked Codex pane is listed first with compact location\n%s\n' "$agent_list" >&2
         exit 1
         ;;
 esac
 
 case "$second_agent" in
-    *working*claude*app:4.1*example-web*"agent / Claude agent"*) ;;
+    *working*claude*app:4.1*example-web*'~/work/example-app'*"agent / Claude agent"*) ;;
     *)
-        printf 'not ok: working Claude pane is listed second\n%s\n' "$agent_list" >&2
+        printf 'not ok: working Claude pane is listed second with compact location\n%s\n' "$agent_list" >&2
         exit 1
         ;;
 esac
