@@ -14,7 +14,7 @@ This repo is personal shell and terminal setup. Keep changes narrow and preserve
 - Shell startup: `zsh_stuff`
 - tmux config: `.tmux.conf`
 - tmux project launcher: `scripts/tm`
-- worktree frontend preview: `scripts/worktree-preview`
+- worktree frontend preview: `worktree-preview` (installed from the Octobr26/worktree-preview repo)
 - tmux private shortcut example: `scripts/tm.local.example`
 - tmux shortcut guide: `docs/tm-shortcuts.md`
 - tmux AI attention watcher: `scripts/tmux-ai-attention`

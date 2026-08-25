@@ -146,29 +146,38 @@ Existing or manually created panes are labeled from their running command and ne
 
 ## Worktree Frontend Preview
 
-`scripts/worktree-preview` lets one tmux session reuse port `3000` across existing Git worktrees.
-It controls the `server` window in the same session as Lazygit; it does not create another tmux session.
+`worktree-preview` reuses one port across the existing Git worktrees of a repository.
+It is installed from https://github.com/Octobr26/worktree-preview and lives at `~/.local/bin/worktree-preview`, with the short alias `wtp`.
+
+It does not use tmux.
+The dev server runs as a detached background process with its own log file, so no `server` window is needed.
 
 Requirements:
 
-- Run Lazygit inside tmux.
-- Keep a window named `server` in that session.
 - Create a Git worktree for each branch you want to preview.
-- Have `lsof`, Node.js, and the project's package manager available.
+- Have the project's package manager available.
 
-In Lazygit's local-branches panel:
+In Lazygit's worktrees panel:
 
-- `U` serves the selected branch's worktree in the session's `server` window.
-- `X` stops that server.
-- Tmux status shows `3000 -> <worktree-directory>`.
+- `P` points the port at the selected worktree, replacing whatever this repository was previewing.
+- `X` stops the preview.
+
+The URL never changes, so switching worktrees is a browser reload.
 
 First use in a worktree installs dependencies when needed.
 Later switches reuse that worktree's dependencies until its package or lockfile changes.
 If the main worktree has `.env`, missing worktree copies are symlinked from it.
 
-Preview identity is directory-based, not branch-polled.
-Lazygit already shows which branch each worktree contains.
-Switching a branch inside a served directory does not rewrite the tmux label; press `U` again after doing that.
+A repository previews one worktree at a time.
+Another repository's preview is never stopped, and neither is an unowned listener on the port.
+
+Inspect state from the terminal:
+
+```sh
+wtp status
+wtp list
+wtp logs
+```
 
 Defaults handle common Vite, Next.js, and Create React App projects using pnpm, npm, Yarn, or Bun.
 Override detection with repo-local Git config when needed:
@@ -183,5 +192,7 @@ git config --add worktreePreview.envFile .env.local
 Inspect without starting a server:
 
 ```sh
-worktree-preview --dry-run feature/example
+wtp dry-run feature/example
 ```
+
+Detection asks the package manager which framework is installed, so `dry-run` reports `start: unresolved` until dependencies exist in that worktree.

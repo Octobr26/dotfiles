@@ -22,7 +22,6 @@ Personal shell and terminal setup.
 - `scripts/remote_run`
 - `scripts/tm`
 - `scripts/tmux-ai-attention`
-- `scripts/worktree-preview`
 - `scripts/tm.local.example`
 - `install.sh`
 - `setup`
