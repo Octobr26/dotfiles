@@ -37,5 +37,15 @@ class HookStateTest(unittest.TestCase):
         )
 
 
+class SoundNotificationsTest(unittest.TestCase):
+    def test_explicit_off_disables_sound_notifications(self):
+        self.assertFalse(MODULE.sound_notifications_enabled("off"))
+        self.assertFalse(MODULE.sound_notifications_enabled(" OFF "))
+
+    def test_unset_or_on_keeps_sound_notifications_enabled(self):
+        self.assertTrue(MODULE.sound_notifications_enabled(""))
+        self.assertTrue(MODULE.sound_notifications_enabled("on"))
+
+
 if __name__ == "__main__":
     unittest.main()

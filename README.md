@@ -132,6 +132,7 @@ Visible-screen matching remains only as a compatibility fallback for older or un
 Codex asks once to review newly installed hooks; after they are trusted, new Codex panes use structured state automatically.
 Use `tmux-ai-attention test` to verify the notification sounds.
 `Ctrl-a a` opens tmux's window picker.
+`Ctrl-a N` toggles AI request and completion sounds without disabling visual state tracking.
 `Ctrl-a R` sets an optional role such as `implement`, `review`, or `commands` on the focused pane; submit a blank role to hide it.
 
 ## Remote Commands

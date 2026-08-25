@@ -42,6 +42,7 @@ COMPLETED = re.compile(r"^\s*[•✓]\s+Done[.!]?", re.IGNORECASE | re.MULTILINE
 SPINNERS = "⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏"
 MAX_PROJECT_LENGTH = 24
 HOOK_COMMAND = "tmux-ai-attention hook"
+SOUND_DISABLED = "off"
 
 
 def tmux(*args: str, check: bool = False) -> str:
@@ -176,7 +177,14 @@ def git_root(path: str, cache: Dict[str, str]) -> str:
     return cache[path]
 
 
+def sound_notifications_enabled(setting: str) -> bool:
+    return setting.strip().lower() != SOUND_DISABLED
+
+
 def play(kind: str) -> None:
+    setting = tmux("show-options", "-gqv", "@ai_sound_enabled")
+    if not sound_notifications_enabled(setting):
+        return
     if sys.platform == "darwin" and shutil.which("afplay"):
         bundled = os.path.join(
             os.path.dirname(os.path.abspath(__file__)),
