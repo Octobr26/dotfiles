@@ -129,8 +129,13 @@ def tool_name(kind: Optional[str], command: str, start: str) -> str:
 
 
 def classify(title: str, text: str) -> str:
-    recent = "\n".join(text.splitlines()[-24:])
-    tail = [line for line in recent.splitlines() if line.strip()][-8:]
+    # Drop blank lines before windowing. A tall or detached pane pads the screen
+    # with blanks, and windowing raw lines first left nothing to inspect: the
+    # prompt fell outside the window, so the pane took the `working` fallback
+    # below and stuck there for good.
+    lines = [line for line in text.splitlines() if line.strip()]
+    recent = "\n".join(lines[-24:])
+    tail = lines[-8:]
     tail_text = "\n".join(tail)
     if any(PROMPT.match(line) for line in tail):
         return "done" if COMPLETED.search(recent) else "idle"
@@ -149,14 +154,18 @@ def hook_state(payload: Dict[str, object]) -> Optional[str]:
         if notification_type in {"permission_prompt", "agent_needs_input"}:
             return "blocked"
         return None
+    # SubagentStop is deliberately absent. A subagent finishing says nothing
+    # about the pane: the main agent may still be running, or may have stopped
+    # already and set `done`. Either constant is wrong in the other case, so
+    # the event returns None and leaves the existing state standing.
     return {
         "SessionStart": "idle",
         "UserPromptSubmit": "working",
         "PermissionRequest": "blocked",
         "PostToolUse": "working",
         "SubagentStart": "working",
-        "SubagentStop": "done",
         "Stop": "done",
+        "StopFailure": "blocked",
         "SessionEnd": "idle",
     }.get(str(event))
 
@@ -304,7 +313,6 @@ class Watcher:
                 if pane.old_source in {"claude-hook", "codex-hook"}:
                     pane.state = pane.old_state or "idle"
                     self.raw.pop(pane.pane, None)
-                    self.displayed[pane.pane] = pane.state
                 else:
                     raw = classify(pane.title, text)
                     previous_raw = self.raw.get(pane.pane, "")
@@ -322,7 +330,11 @@ class Watcher:
                     elif pane.pane != focused and raw == "blocked" and previous_raw != "blocked":
                         play("request")
                     self.raw[pane.pane] = raw
-                    self.displayed[pane.pane] = pane.state
+
+                # A focused completion has been acknowledged.
+                if pane.state == "done" and pane.pane == focused:
+                    pane.state = "idle"
+                self.displayed[pane.pane] = pane.state
                 window_states[pane.window].append(pane.state)
             else:
                 self.raw.pop(pane.pane, None)

@@ -1,4 +1,6 @@
+import contextlib
 import importlib.util
+import io
 import sys
 import unittest
 from pathlib import Path
@@ -17,6 +19,21 @@ class ClassifyClaudePaneTest(unittest.TestCase):
     def test_prompt_without_background_agent_is_idle(self):
         self.assertEqual(MODULE.classify("✳ Claude Code", "❯ next task\n"), "idle")
 
+    def test_prompt_survives_trailing_blank_padding(self):
+        """A tall or detached pane pads the screen with blank lines.
+
+        classify() windowed the last 24 RAW lines, so on a 73-row pane holding
+        16 lines of content the window was entirely blank, PROMPT never matched,
+        and the pane fell through to the unconditional `working` fallback and
+        stuck there permanently.
+        """
+        screen = "\u203a Ask Codex to do anything\n" + "\n" * 58
+        self.assertEqual(MODULE.classify("codex", screen), "idle")
+
+    def test_completed_marker_survives_trailing_blank_padding(self):
+        screen = "\u2022 Done.\n\u203a Ask Codex to do anything\n" + "\n" * 58
+        self.assertEqual(MODULE.classify("codex", screen), "done")
+
 
 class HookStateTest(unittest.TestCase):
     def test_claude_stop_with_background_work_is_done(self):
@@ -32,9 +49,24 @@ class HookStateTest(unittest.TestCase):
     def test_claude_stop_without_background_work_is_done(self):
         self.assertEqual(MODULE.hook_state({"hook_event_name": "Stop"}), "done")
 
-    def test_claude_subagent_stop_is_done(self):
+    def test_claude_subagent_stop_does_not_change_state(self):
+        """A subagent finishing says nothing about the pane, so it must not override.
+
+        Mapping it to `done` finishes a pane whose main agent is still running.
+        Mapping it to `working` un-finishes a pane whose Stop already fired, which
+        the background-work case above shows really happens.
+        """
+        self.assertIsNone(MODULE.hook_state({"hook_event_name": "SubagentStop"}))
+
+    def test_stop_then_subagent_stop_leaves_the_pane_done(self):
+        """The regression this guards: Stop -> done must survive a later SubagentStop."""
+        self.assertEqual(MODULE.hook_state({"hook_event_name": "Stop"}), "done")
+        self.assertIsNone(MODULE.hook_state({"hook_event_name": "SubagentStop"}))
+
+    def test_stop_failure_is_blocked(self):
+        """An API-ended turn needs the user; without this the pane sticks on working."""
         self.assertEqual(
-            MODULE.hook_state({"hook_event_name": "SubagentStop"}), "done"
+            MODULE.hook_state({"hook_event_name": "StopFailure"}), "blocked"
         )
 
 
@@ -150,3 +182,63 @@ class GitRootCacheTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class PollFocusedDoneTest(unittest.TestCase):
+    """Regression cover for done -> idle, driven through Watcher.poll()."""
+
+    @staticmethod
+    def pane_row(pane_id: str, state: str, source: str) -> str:
+        return MODULE.SEP.join(
+            [
+                "session", "@1", pane_id, "123", "codex", "codex", "/tmp",
+                "title", "codex", "", "CODEX", "", state, source,
+            ]
+        )
+
+    def poll_with(self, focused: str, state: str, pane_id: str = "%1"):
+        """Run a real poll() against a fake tmux and return the option writes."""
+        writes = []
+
+        def fake_tmux(*args, **kwargs):
+            if args[0] == "list-panes":
+                return self.pane_row(pane_id, state, "codex-hook") + "\n"
+            if args[0] == "display-message":
+                return focused + "\n"
+            if args[0] == "capture-pane":
+                return "\u203a ready\n"
+            if args[0] == "set-option":
+                writes.append(args)
+            return ""
+
+        with (
+            patch.object(MODULE, "tmux", side_effect=fake_tmux),
+            patch.object(MODULE, "process_children", return_value={}),
+            patch.object(MODULE, "git_root", return_value=""),
+            patch.object(MODULE, "play"),
+            contextlib.redirect_stdout(io.StringIO()),
+        ):
+            MODULE.Watcher({}, {}, {}, set()).poll()
+        return writes
+
+    def pane_state_written(self, writes, pane_id: str = "%1"):
+        for args in writes:
+            if "@pane_state" in args and pane_id in args:
+                return args[-1]
+        return None
+
+    def test_focused_done_becomes_idle(self):
+        writes = self.poll_with(focused="%1", state="done")
+        self.assertEqual(self.pane_state_written(writes), "idle")
+
+    def test_unfocused_done_stays_done(self):
+        writes = self.poll_with(focused="%9", state="done")
+        self.assertIsNone(self.pane_state_written(writes))
+
+    def test_focused_blocked_is_not_cleared(self):
+        writes = self.poll_with(focused="%1", state="blocked")
+        self.assertIsNone(self.pane_state_written(writes))
+
+    def test_focused_working_is_not_cleared(self):
+        writes = self.poll_with(focused="%1", state="working")
+        self.assertIsNone(self.pane_state_written(writes))

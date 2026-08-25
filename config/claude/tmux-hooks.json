@@ -89,6 +89,17 @@
         ]
       }
     ],
+    "StopFailure": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "tmux-ai-attention hook claude",
+            "timeout": 2
+          }
+        ]
+      }
+    ],
     "SessionEnd": [
       {
         "hooks": [
