@@ -1,0 +1,41 @@
+{
+  "name": "Solarized Dark",
+  "ghostty": "iTerm2 Solarized Dark",
+  "herdr": "solarized",
+  "nvim": "solarized",
+  "bat": "Solarized (dark)",
+  "codex": "solarized-dark",
+  "mode": "dark",
+  "colors": {
+    "background": "#002b36",
+    "foreground": "#839496",
+    "muted": "#657b83",
+    "surface": "#073642",
+    "accent": "#268bd2",
+    "blue": "#268bd2",
+    "orange": "#cb4b16",
+    "yellow": "#b58900",
+    "aqua": "#2aa198",
+    "purple": "#6c71c4",
+    "green": "#859900",
+    "red": "#dc322f"
+  },
+  "ansi": [
+    "#073642",
+    "#dc322f",
+    "#859900",
+    "#b58900",
+    "#268bd2",
+    "#d33682",
+    "#2aa198",
+    "#eee8d5",
+    "#335e69",
+    "#cb4b16",
+    "#586e75",
+    "#657b83",
+    "#839496",
+    "#6c71c4",
+    "#93a1a1",
+    "#fdf6e3"
+  ]
+}

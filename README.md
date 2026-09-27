@@ -8,8 +8,9 @@ Personal shell and terminal setup.
 - `AGENTS.md`
 - `CLAUDE.md`
 - `config/agents/AGENTS.md`
-- `config/agents/pipelines/`
+- `config/agents/workflows/`
 - `config/claude/agents/`
+- `config/skills/`
 - `.ignore`
 - `.tmux.conf`
 - `config/nvim`
@@ -36,11 +37,18 @@ Repo `AGENTS.md` is the shared map for agents working inside this dotfiles check
 
 `config/agents/AGENTS.md` is the global high-level agent instruction source for Luis' computer. The installer links it to `~/AGENTS.md`, then links `~/CLAUDE.md`, `~/.codex/AGENTS.md`, and `~/.claude/CLAUDE.md` back to `~/AGENTS.md`.
 
-`config/agents/pipelines/` contains the portable routing layer for non-trivial work outside a project with its own workflow. It supports local, remote, and cloud execution without coupling task coordination to a specific agent UI or provider.
+`config/agents/workflows/` contains the portable routing layer for non-trivial work outside a project with its own workflow. It supports local, remote, and cloud execution without coupling task coordination to a specific agent UI or provider.
 Its research route separates evidence collection, synthesis, and local pattern-fit before a proposed change is planned.
 Its challenge route uses bounded, evidence-driven skepticism and adjudication for material assumptions and results.
 
-`config/claude/agents/` provides user-level Claude Code subagents with explicit model selection and supported effort settings for the universal pipeline. The installer links each definition into `~/.claude/agents/` without taking ownership of unrelated personal subagents.
+`config/claude/agents/` provides user-level Claude Code subagents with explicit model selection and supported effort settings for the universal workflow. The installer links each definition into `~/.claude/agents/` without taking ownership of unrelated personal subagents.
+It also moves legacy agent symlinks owned by this checkout into the install backup directory.
+
+`config/skills/` contains five locally adapted, revision-pinned skills for TDD, bug diagnosis, handoff, domain modeling, and codebase design.
+It also owns `render-output`, the shared final-response format for both providers.
+The installer links each canonical directory into both `~/.codex/skills/` and `~/.claude/skills/`, preserving and reporting conflicting personal skill names.
+Universal workflows load them only when relevant; handoff remains explicitly requested.
+See [the catalog](config/skills/README.md) for sources and updates, and [the integration plan](docs/agent-skills-plan.md) for routing and verification.
 
 ## Install
 
@@ -81,7 +89,7 @@ The installer detects `macos`, `linux`, `wsl`, or `windows`.
 - links global agent instructions through `~/AGENTS.md` for Codex and Claude entrypoints
 - merges tmux lifecycle handlers into `~/.codex/hooks.json` and `~/.claude/settings.json` without replacing other hooks
 - requires Python 3.9 or newer for the tmux AI attention watcher and hook merger
-- links the universal Claude pipeline agents individually under `~/.claude/agents/`
+- links the universal Claude workflow agents individually under `~/.claude/agents/`
 - macOS/Linux/WSL: links `.tmux.conf`
 - macOS: links Ghostty and lazygit from their `~/Library/Application Support/...` locations
 - Linux/WSL: links Ghostty and lazygit under `~/.config/...`
@@ -104,8 +112,10 @@ source "/path/to/dotfiles/zsh_stuff"
 
 ## Theme
 
-Ghostty, tmux, Neovim, Atuin, Starship, and bat use Gruvbox Dark.
-Lazygit and fzf inherit the current terminal's ANSI palette rather than maintaining duplicate theme definitions.
+Run `theme` to choose from eight shared palettes for Ghostty, Herdr, Neovim, Starship, Atuin, bat, Spotify, Codex, and Claude: Catppuccin Mocha/Latte, Gruvbox Dark/Light, Dracula, Nord, and Solarized Dark/Light.
+Lazygit uses terminal colors, and fzf explicitly selects its `base16` palette.
+See [the selector guide](docs/theme-selector.md) for the Herdr popup, first-use steps, refresh behavior, and recovery.
+The existing tmux configuration remains independently configured with Gruvbox Dark.
 
 ## tm Shortcuts
 
@@ -177,11 +187,11 @@ See `docs/mutagen-remote-workflow.md` for the safety checks, endpoint mapping, a
 ~/CLAUDE.md -> ~/AGENTS.md
 ~/.codex/AGENTS.md -> ~/AGENTS.md
 ~/.claude/CLAUDE.md -> ~/AGENTS.md
-~/.claude/agents/pipeline-collector.md -> ~/dev/dotfiles/config/claude/agents/pipeline-collector.md
-~/.claude/agents/pipeline-maker.md -> ~/dev/dotfiles/config/claude/agents/pipeline-maker.md
-~/.claude/agents/pipeline-skeptic.md -> ~/dev/dotfiles/config/claude/agents/pipeline-skeptic.md
-~/.claude/agents/pipeline-adjudicator.md -> ~/dev/dotfiles/config/claude/agents/pipeline-adjudicator.md
-~/.claude/agents/pipeline-deep-agent.md -> ~/dev/dotfiles/config/claude/agents/pipeline-deep-agent.md
+~/.claude/agents/workflow-collector.md -> ~/dev/dotfiles/config/claude/agents/workflow-collector.md
+~/.claude/agents/workflow-maker.md -> ~/dev/dotfiles/config/claude/agents/workflow-maker.md
+~/.claude/agents/workflow-skeptic.md -> ~/dev/dotfiles/config/claude/agents/workflow-skeptic.md
+~/.claude/agents/workflow-adjudicator.md -> ~/dev/dotfiles/config/claude/agents/workflow-adjudicator.md
+~/.claude/agents/workflow-deep-agent.md -> ~/dev/dotfiles/config/claude/agents/workflow-deep-agent.md
 ~/.config/nvim -> ~/dev/dotfiles/config/nvim
 ~/.config/atuin -> ~/dev/dotfiles/config/atuin
 ~/.config/git/ignore -> ~/dev/dotfiles/config/git/ignore

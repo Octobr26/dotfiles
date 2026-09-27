@@ -1,0 +1,41 @@
+{
+  "name": "Catppuccin Latte",
+  "ghostty": "Catppuccin Latte",
+  "herdr": "catppuccin-latte",
+  "nvim": "catppuccin-latte",
+  "bat": "Catppuccin Latte",
+  "codex": "catppuccin-latte",
+  "mode": "light",
+  "colors": {
+    "background": "#eff1f5",
+    "foreground": "#4c4f69",
+    "muted": "#6c6f85",
+    "surface": "#ccd0da",
+    "accent": "#8839ef",
+    "blue": "#1e66f5",
+    "orange": "#fe640b",
+    "yellow": "#df8e1d",
+    "aqua": "#179299",
+    "purple": "#8839ef",
+    "green": "#40a02b",
+    "red": "#d20f39"
+  },
+  "ansi": [
+    "#5c5f77",
+    "#d20f39",
+    "#40a02b",
+    "#df8e1d",
+    "#1e66f5",
+    "#ea76cb",
+    "#179299",
+    "#acb0be",
+    "#6c6f85",
+    "#de293e",
+    "#49af3d",
+    "#eea02d",
+    "#456eff",
+    "#fe85d8",
+    "#2d9fa8",
+    "#bcc0cc"
+  ]
+}

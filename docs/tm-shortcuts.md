@@ -14,12 +14,30 @@
 These bindings use `Ctrl-a` as the tmux prefix and open in the focused pane's current directory:
 
 - `Ctrl-a y` opens lazygit.
-- `Ctrl-a Ctrl-s` opens `spotify_player`.
+- `Ctrl-a Ctrl-s` opens `spotify_player` and keeps its audio daemon independent of the popup.
 - `Ctrl-a t` opens a login shell instead of tmux's default clock.
 
 Lazygit and the terminal use 80% of the tmux client's width and height, while `spotify_player` uses 90%.
 Each popup closes when its command exits.
 Change the `-w` and `-h` values in `.tmux.conf` to resize them.
+
+### Spotify daemon controls
+
+Run `spotify-daemon` in any terminal for a start/stop/restart menu, or use:
+
+- `spotify-daemon status` shows the process, runtime, and local command socket status.
+- `spotify-daemon stop` stops background playback, including after closing the popup.
+- `spotify-daemon start` starts the daemon or replaces one without a working command socket.
+- `spotify-daemon restart` stops the daemon and starts it again.
+
+The Spotify popup runs `spotify-daemon start` before opening its UI.
+Closing the popup with `q` leaves the daemon running.
+Stopping the daemon leaves an already-open popup without its local playback device; reopen the popup to start it again.
+
+On macOS, a LaunchAgent can run `spotify-daemon expire --quiet` every 60 seconds.
+This stops default Spotify daemons after 24 hours of total runtime, even during playback.
+The check runs after wake if the Mac was asleep; opening the popup starts a fresh daemon with a new 24-hour window.
+The `expire` command is local and does not query Spotify's API.
 
 ## Public Launcher Flow
 

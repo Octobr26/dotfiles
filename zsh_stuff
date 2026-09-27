@@ -13,7 +13,30 @@ fi
 path=("$HOME/.local/bin" "$dotfiles_dir/scripts" $path)
 typeset -U path
 export PATH
-export BAT_THEME="gruvbox-dark"
+# Existing prompts read the current selection without restarting their shell.
+function dotfiles_theme_refresh() {
+    local theme_generated="${XDG_CONFIG_HOME:-$HOME/.config}/terminal-theme/generated"
+    if [[ -r "$theme_generated/shell.zsh" ]]; then
+        source "$theme_generated/shell.zsh"
+        if [[ "${XDG_CONFIG_HOME:-$HOME/.config}/starship.toml" -nt "$theme_generated/starship.toml" ]]; then
+            command theme refresh-shell
+        fi
+    else
+        export BAT_THEME="gruvbox-dark"
+        [[ "${STARSHIP_CONFIG:-}" == "$theme_generated/starship.toml" ]] && unset STARSHIP_CONFIG
+        [[ "${ATUIN_THEME_DIR:-}" == "$theme_generated/atuin" ]] && unset ATUIN_THEME_DIR
+    fi
+    return 0
+}
+autoload -Uz add-zsh-hook
+add-zsh-hook -d precmd dotfiles_theme_refresh
+add-zsh-hook precmd dotfiles_theme_refresh
+add-zsh-hook -d preexec dotfiles_theme_refresh
+add-zsh-hook preexec dotfiles_theme_refresh
+dotfiles_theme_refresh
+if [[ " ${FZF_DEFAULT_OPTS:-} " != *" --color=base16 "* ]]; then
+    export FZF_DEFAULT_OPTS="${FZF_DEFAULT_OPTS:+$FZF_DEFAULT_OPTS }--color=base16"
+fi
 alias ls='eza --icons=always -x --sort=extension'
 alias lg='lazygit'
 alias cc='claude'

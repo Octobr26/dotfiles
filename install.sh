@@ -353,11 +353,55 @@ link_agent_instructions() {
     link_file "$home_agents" "$HOME/CLAUDE.md"
     link_file "$home_agents" "$HOME/.codex/AGENTS.md"
     link_file "$home_agents" "$HOME/.claude/CLAUDE.md"
-    link_file "$DOTFILES_DIR/config/claude/agents/pipeline-collector.md" "$HOME/.claude/agents/pipeline-collector.md"
-    link_file "$DOTFILES_DIR/config/claude/agents/pipeline-maker.md" "$HOME/.claude/agents/pipeline-maker.md"
-    link_file "$DOTFILES_DIR/config/claude/agents/pipeline-skeptic.md" "$HOME/.claude/agents/pipeline-skeptic.md"
-    link_file "$DOTFILES_DIR/config/claude/agents/pipeline-adjudicator.md" "$HOME/.claude/agents/pipeline-adjudicator.md"
-    link_file "$DOTFILES_DIR/config/claude/agents/pipeline-deep-agent.md" "$HOME/.claude/agents/pipeline-deep-agent.md"
+    link_workflow_agents
+    if ! link_workflow_skills; then
+        printf 'warn: some workflow skills were skipped due to name conflicts; remaining setup will continue\n' >&2
+    fi
+}
+
+link_workflow_agents() {
+    local role legacy_agent legacy_source
+
+    for role in collector maker skeptic adjudicator deep-agent; do
+        link_file "$DOTFILES_DIR/config/claude/agents/workflow-$role.md" "$HOME/.claude/agents/workflow-$role.md"
+
+        # Retire only links owned by this checkout; preserve personal definitions.
+        legacy_agent="$HOME/.claude/agents/pipeline-$role.md"
+        legacy_source="$DOTFILES_DIR/config/claude/agents/pipeline-$role.md"
+        if [ -L "$legacy_agent" ] && [ "$(readlink "$legacy_agent")" = "$legacy_source" ]; then
+            mkdir -p "$BACKUP_DIR"
+            mv "$legacy_agent" "$BACKUP_DIR/"
+            printf 'backup: %s -> %s/\n' "$legacy_agent" "$BACKUP_DIR"
+        fi
+    done
+}
+
+link_workflow_skills() {
+    local skill provider target source shared_skill
+    local conflicts=0
+    local skills=(tdd diagnosing-bugs handoff domain-modeling codebase-design render-output)
+
+    for skill in "${skills[@]}"; do
+        source="$DOTFILES_DIR/config/skills/$skill"
+        for provider in codex claude; do
+            target="$HOME/.$provider/skills/$skill"
+            # Codex also discovers shared skills; do not install a second copy.
+            shared_skill="$HOME/.agents/skills/$skill"
+            if [ "$provider" = codex ] && { [ -e "$shared_skill" ] || [ -L "$shared_skill" ]; }; then
+                printf 'conflict: %s already exists; leaving %s unchanged\n' "$shared_skill" "$target" >&2
+                conflicts=1
+                continue
+            fi
+            if { [ -e "$target" ] || [ -L "$target" ]; } &&
+               { [ ! -L "$target" ] || [ "$(readlink "$target")" != "$source" ]; }; then
+                printf 'conflict: preserving existing skill %s\n' "$target" >&2
+                conflicts=1
+                continue
+            fi
+            link_file "$source" "$target"
+        done
+    done
+    return "$conflicts"
 }
 
 install_tmux_ai_hooks() {

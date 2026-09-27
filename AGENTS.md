@@ -22,8 +22,9 @@ This repo is personal shell and terminal setup. Keep changes narrow and preserve
 - Claude lifecycle hooks: `config/claude/tmux-hooks.json`
 - Ghostty config: `config/ghostty/config.ghostty`
 - Global agent instructions: `config/agents/AGENTS.md`
-- Universal agent pipelines: `config/agents/pipelines/README.md`
-- Claude pipeline subagents: `config/claude/agents/`
+- Universal agent workflows: `config/agents/workflows/README.md`
+- Claude workflow subagents: `config/claude/agents/`
+- Adapted cross-agent skills: `config/skills/README.md`
 - Installer and symlink management: `install.sh`
 - General entrypoint: `setup`
 - Luis entrypoint: `setup-luis`
@@ -45,6 +46,7 @@ This repo is personal shell and terminal setup. Keep changes narrow and preserve
 - Inspect `git status -sb` before editing. Do not stage unrelated user changes.
 - For terminal behavior questions, identify the layer first: Ghostty, zsh, tmux, or helper script.
 - Prefer changing the actual source file in this repo over editing symlink targets elsewhere.
+- For workflow, skill, or agent-instruction edits, read `config/agents/workflows/instruction-writing.md`.
 - Do not add secrets, shell history databases, Atuin keys, GitHub auth, lazygit state, or global `.gitconfig`.
 - Keep private workflow shortcuts consistent with `scripts/tm.local.example` and document reusable patterns in `docs/tm-shortcuts.md`.
 

@@ -1,0 +1,15 @@
+{
+  "name": "Catppuccin Mocha",
+  "ghostty": "Catppuccin Mocha",
+  "herdr": "catppuccin",
+  "nvim": "catppuccin-mocha",
+  "bat": "Catppuccin Mocha",
+  "codex": "catppuccin-mocha",
+  "colors": {
+    "background": "#1e1e2e", "foreground": "#cdd6f4", "muted": "#a6adc8",
+    "surface": "#313244", "accent": "#cba6f7", "blue": "#89b4fa",
+    "orange": "#fab387", "yellow": "#f9e2af", "aqua": "#94e2d5",
+    "purple": "#cba6f7", "green": "#a6e3a1", "red": "#f38ba8"
+  },
+  "ansi": ["#45475a", "#f38ba8", "#a6e3a1", "#f9e2af", "#89b4fa", "#f5c2e7", "#94e2d5", "#a6adc8", "#585b70", "#f37799", "#89d88b", "#ebd391", "#74a8fc", "#f2aede", "#6bd7ca", "#bac2de"]
+}

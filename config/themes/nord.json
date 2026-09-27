@@ -1,0 +1,41 @@
+{
+  "name": "Nord",
+  "ghostty": "Nord",
+  "herdr": "nord",
+  "nvim": "nord",
+  "bat": "Nord",
+  "codex": "nord",
+  "mode": "dark",
+  "colors": {
+    "background": "#2e3440",
+    "foreground": "#d8dee9",
+    "muted": "#a5abb6",
+    "surface": "#3b4252",
+    "accent": "#88c0d0",
+    "blue": "#81a1c1",
+    "orange": "#d08770",
+    "yellow": "#ebcb8b",
+    "aqua": "#8fbcbb",
+    "purple": "#b48ead",
+    "green": "#a3be8c",
+    "red": "#bf616a"
+  },
+  "ansi": [
+    "#3b4252",
+    "#bf616a",
+    "#a3be8c",
+    "#ebcb8b",
+    "#81a1c1",
+    "#b48ead",
+    "#88c0d0",
+    "#e5e9f0",
+    "#596377",
+    "#bf616a",
+    "#a3be8c",
+    "#ebcb8b",
+    "#81a1c1",
+    "#b48ead",
+    "#8fbcbb",
+    "#eceff4"
+  ]
+}

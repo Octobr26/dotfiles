@@ -1,0 +1,8 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# Keep audio independent from the popup, and replace an unresponsive daemon.
+script_dir=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
+"$script_dir/spotify-daemon" start --quiet
+
+exec spotify_player -o enable_streaming=DaemonOnly

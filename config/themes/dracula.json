@@ -1,0 +1,41 @@
+{
+  "name": "Dracula",
+  "ghostty": "Dracula",
+  "herdr": "dracula",
+  "nvim": "dracula",
+  "bat": "Dracula",
+  "codex": "dracula",
+  "mode": "dark",
+  "colors": {
+    "background": "#282a36",
+    "foreground": "#f8f8f2",
+    "muted": "#6272a4",
+    "surface": "#44475a",
+    "accent": "#bd93f9",
+    "blue": "#8be9fd",
+    "orange": "#ffb86c",
+    "yellow": "#f1fa8c",
+    "aqua": "#8be9fd",
+    "purple": "#bd93f9",
+    "green": "#50fa7b",
+    "red": "#ff5555"
+  },
+  "ansi": [
+    "#21222c",
+    "#ff5555",
+    "#50fa7b",
+    "#f1fa8c",
+    "#bd93f9",
+    "#ff79c6",
+    "#8be9fd",
+    "#f8f8f2",
+    "#6272a4",
+    "#ff6e6e",
+    "#69ff94",
+    "#ffffa5",
+    "#d6acff",
+    "#ff92df",
+    "#a4ffff",
+    "#ffffff"
+  ]
+}

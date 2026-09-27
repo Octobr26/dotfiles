@@ -1,0 +1,4 @@
+# Fallback for shells that have not loaded the shared theme environment yet.
+[theme]
+name = "terminal-theme"
+parent = "gruvbox-dark"

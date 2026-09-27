@@ -21,3 +21,6 @@ scripts/tm.local
 # Python bytecode cache
 __pycache__/
 *.pyc
+
+# Local workflow history and runtime locks
+config/agents/metrics/

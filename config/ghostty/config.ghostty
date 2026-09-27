@@ -1,4 +1,6 @@
 theme = Gruvbox Dark
+# Shared selector output; the theme above remains the fallback.
+config-file = ?~/.config/terminal-theme/generated/ghostty.conf
 font-size = 19
 adjust-cell-height = 10%
 background-opacity = 1.0

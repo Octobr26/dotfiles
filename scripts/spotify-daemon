@@ -1,0 +1,151 @@
+#!/usr/bin/env python3
+"""Manage the default spotify_player daemon without polling Spotify's API."""
+
+import argparse
+import fcntl
+import os
+from pathlib import Path
+import re
+import shutil
+import signal
+import subprocess
+import sys
+import time
+
+DAEMON_PATTERN = r"^([^ ]*/)?spotify_player --daemon$"
+START_TIMEOUT = 20
+STOP_TIMEOUT = 5
+MAX_RUNTIME_SECONDS = 24 * 60 * 60
+CACHE = Path(os.environ.get("XDG_CACHE_HOME", Path.home() / ".cache")) / "spotify-player"
+
+
+def run(*args):
+    result = subprocess.run(args, capture_output=True, text=True, timeout=5)
+    if result.returncode not in (0, 1):
+        raise RuntimeError(result.stderr.strip() or "Command failed: " + " ".join(args))
+    return result
+
+
+def daemons():
+    result = run("pgrep", "-u", str(os.getuid()), "-f", DAEMON_PATTERN)
+    return [int(pid) for pid in result.stdout.split()]
+
+
+def identity(pid):
+    result = run("ps", "-p", str(pid), "-o", "lstart=", "-o", "command=")
+    fields = result.stdout.strip().split(None, 5)
+    if len(fields) != 6 or not re.fullmatch(DAEMON_PATTERN, fields[5]):
+        return None
+    return result.stdout.strip()
+
+
+def responsive(pid):
+    # Check this daemon's command socket, not the popup's or Spotify's Web API.
+    lsof = shutil.which("lsof") or "/usr/sbin/lsof"
+    result = run(lsof, "-nP", "-a", "-p", str(pid), "-iUDP", "-Fn")
+    return any(line.startswith("n127.0.0.1:") for line in result.stdout.splitlines())
+
+
+def status():
+    pids = daemons()
+    if not pids:
+        print("Spotify daemon: stopped")
+        return
+    for pid in pids:
+        age = run("ps", "-p", str(pid), "-o", "etime=").stdout.strip()
+        health = "command socket open" if responsive(pid) else "unresponsive; run spotify-daemon restart"
+        print(f"Spotify daemon: PID {pid}, runtime {age}, {health}")
+
+
+def runtime_seconds(pid):
+    elapsed = run("ps", "-p", str(pid), "-o", "etime=").stdout.strip()
+    if not elapsed:
+        return 0
+    days, _, clock = elapsed.rpartition("-")
+    seconds = 0
+    for part in clock.split(":"):
+        seconds = seconds * 60 + int(part)
+    return int(days or 0) * 86400 + seconds
+
+
+def stop(pids=None):
+    targets = {pid: identity(pid) for pid in (daemons() if pids is None else pids)}
+    for pid, original in targets.items():
+        if original and identity(pid) == original:
+            try:
+                os.kill(pid, signal.SIGTERM)
+            except ProcessLookupError:
+                pass
+    deadline = time.monotonic() + STOP_TIMEOUT
+    while any(original and identity(pid) == original for pid, original in targets.items()):
+        if time.monotonic() >= deadline:
+            raise RuntimeError("Daemon did not stop after SIGTERM; no forced kill was sent.")
+        time.sleep(0.2)
+
+
+def start():
+    pids = daemons()
+    if len(pids) == 1 and runtime_seconds(pids[0]) < MAX_RUNTIME_SECONDS and responsive(pids[0]):
+        return
+    if pids:
+        stop()
+    player = shutil.which("spotify_player")
+    if not player:
+        raise RuntimeError("spotify_player is not on PATH")
+    with (CACHE / "daemon-startup.log").open("a") as log:
+        subprocess.run([player, "--daemon"], stdin=subprocess.DEVNULL,
+                       stdout=log, stderr=log, check=True, timeout=START_TIMEOUT)
+    deadline = time.monotonic() + START_TIMEOUT
+    while time.monotonic() < deadline:
+        pids = daemons()
+        if len(pids) == 1 and responsive(pids[0]):
+            return
+        time.sleep(0.5)
+    raise RuntimeError(f"Daemon did not open its command socket; check logs in {CACHE}")
+
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("action", nargs="?", default="menu",
+                        choices=("menu", "status", "start", "stop", "restart", "expire"))
+    parser.add_argument("--quiet", action="store_true")
+    args = parser.parse_args()
+    action = args.action
+    if action == "menu":
+        status()
+        if not sys.stdin.isatty():
+            return
+        print("1) Start  2) Stop  3) Restart  4) Status  q) Quit")
+        action = {"1": "start", "2": "stop", "3": "restart", "4": "status"}.get(input("> ").strip())
+        if not action:
+            return
+    if action == "status":
+        status()
+        return
+    CACHE.mkdir(parents=True, exist_ok=True)
+    with (CACHE / "daemon-control.lock").open("a") as lock:
+        try:
+            fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError:
+            if action == "expire":
+                return  # The scheduled check can retry next minute.
+            raise RuntimeError("Another Spotify daemon command is running; try again shortly.")
+        if action == "expire":
+            stop([pid for pid in daemons() if runtime_seconds(pid) >= MAX_RUNTIME_SECONDS])
+            return
+        if action in ("stop", "restart"):
+            stop()
+        if action in ("start", "restart"):
+            start()
+        if not args.quiet:
+            status()
+
+
+if __name__ == "__main__":
+    try:
+        main()
+    except (RuntimeError, OSError, subprocess.SubprocessError) as error:
+        print(f"spotify-daemon: {error}", file=sys.stderr)
+        sys.exit(1)
+    except (KeyboardInterrupt, EOFError):
+        sys.exit(0)

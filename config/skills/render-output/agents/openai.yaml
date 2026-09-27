@@ -1,0 +1,3 @@
+interface:
+  display_name: "Render Output"
+  short_description: "Scannable formatting for every final response"
