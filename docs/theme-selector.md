@@ -32,10 +32,11 @@ The first apply retains its original file contents in the private local state di
 
 ## Herdr popup
 
-The local Herdr configuration binds **Ctrl-a, then t** to this picker.
+The tracked Herdr configuration (`config/herdr/config.toml`) binds **Ctrl-a, then t** to this picker.
 The scratch terminal is on **Ctrl-a, then u** so it cannot catch the theme shortcut.
 It opens at 85% width and 75% height and returns to the existing pane when closed.
-For another installation, add the following to Herdr's `config.toml`, using an unoccupied binding and a command resolvable in its PATH:
+The installer links this config on macOS/Linux/WSL.
+For an installation using its own Herdr config, add the following with an unoccupied binding and `theme` available in its PATH:
 
 ```toml
 [[keys.command]]

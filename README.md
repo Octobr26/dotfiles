@@ -17,6 +17,7 @@ Personal shell and terminal setup.
 - `config/atuin`
 - `config/starship/starship.toml`
 - `config/git/ignore`
+- `config/herdr/config.toml`
 - `config/ghostty/config.ghostty`
 - `config/lazygit/config.yml`
 - `config/codex/tmux-hooks.json`
@@ -90,7 +91,7 @@ The installer detects `macos`, `linux`, `wsl`, or `windows`.
 - merges tmux lifecycle handlers into `~/.codex/hooks.json` and `~/.claude/settings.json` without replacing other hooks
 - requires Python 3.9 or newer for the tmux AI attention watcher and hook merger
 - links the universal Claude workflow agents individually under `~/.claude/agents/`
-- macOS/Linux/WSL: links `.tmux.conf`
+- macOS/Linux/WSL: links `.tmux.conf` and the Herdr config at `~/.config/herdr/config.toml`
 - macOS: links Ghostty and lazygit from their `~/Library/Application Support/...` locations
 - Linux/WSL: links Ghostty and lazygit under `~/.config/...`
 - Windows: skips tmux because native Windows does not match tmux/zsh behavior well
@@ -192,6 +193,7 @@ See `docs/mutagen-remote-workflow.md` for the safety checks, endpoint mapping, a
 ~/.claude/agents/workflow-skeptic.md -> ~/dev/dotfiles/config/claude/agents/workflow-skeptic.md
 ~/.claude/agents/workflow-adjudicator.md -> ~/dev/dotfiles/config/claude/agents/workflow-adjudicator.md
 ~/.claude/agents/workflow-deep-agent.md -> ~/dev/dotfiles/config/claude/agents/workflow-deep-agent.md
+~/.config/herdr/config.toml -> ~/dev/dotfiles/config/herdr/config.toml
 ~/.config/nvim -> ~/dev/dotfiles/config/nvim
 ~/.config/atuin -> ~/dev/dotfiles/config/atuin
 ~/.config/git/ignore -> ~/dev/dotfiles/config/git/ignore

@@ -316,6 +316,7 @@ link_file() {
 }
 
 link_common_configs() {
+    link_file "$DOTFILES_DIR/config/herdr/config.toml" "$HOME/.config/herdr/config.toml"
     link_file "$DOTFILES_DIR/config/nvim" "$HOME/.config/nvim"
     link_file "$DOTFILES_DIR/config/atuin" "$HOME/.config/atuin"
     link_file "$DOTFILES_DIR/config/git/ignore" "$HOME/.config/git/ignore"

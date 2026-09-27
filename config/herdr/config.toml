@@ -1,0 +1,52 @@
+onboarding = false
+
+[theme]
+name = "catppuccin"
+auto_switch = false
+
+[keys]
+prefix = "ctrl+a"
+previous_agent = "ctrl+alt+h"
+next_agent = "ctrl+alt+l"
+focus_agent = "ctrl+alt+1..9"
+
+[[keys.command]]
+key = "prefix+u"
+type = "popup"
+command = "exec \"${SHELL:-sh}\""
+description = "scratch terminal"
+width = "80%"
+height = "80%"
+
+[[keys.command]]
+key = "prefix+ctrl+s"
+type = "popup"
+command = "spotify-popup"
+description = "Spotify player"
+width = "90%"
+height = "90%"
+
+[ui]
+agent_panel_sort = "priority"
+status_indicators = "symbols"
+
+show_agent_labels_on_pane_borders = true
+[ui.sidebar.agents]
+row_gap = 1
+rows = [
+  ["state_icon", { token = "tab", fg = "#cdd6f4", bold = true, dim = false }],
+  [{ token = "workspace", fg = "#a6adc8", bold = false, dim = false }, "state_text"],
+]
+
+[ui.toast]
+delivery = "system"
+
+# BEGIN terminal-theme popup
+[[keys.command]]
+key = "prefix+t"
+type = "popup"
+command = "exec theme"
+description = "shared themes"
+width = "85%"
+height = "75%"
+# END terminal-theme popup
