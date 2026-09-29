@@ -16,7 +16,6 @@ nodejs
 npm
 ripgrep
 tar
-tmux
 unzip
 xz
 zsh

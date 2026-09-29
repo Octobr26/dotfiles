@@ -12,7 +12,6 @@ Personal shell and terminal setup.
 - `config/claude/agents/`
 - `config/skills/`
 - `.ignore`
-- `.tmux.conf`
 - `config/nvim`
 - `config/atuin`
 - `config/starship/starship.toml`
@@ -20,16 +19,10 @@ Personal shell and terminal setup.
 - `config/herdr/config.toml`
 - `config/ghostty/config.ghostty`
 - `config/lazygit/config.yml`
-- `config/codex/tmux-hooks.json`
-- `config/claude/tmux-hooks.json`
 - `scripts/remote_run`
-- `scripts/tm`
-- `scripts/tmux-ai-attention`
-- `scripts/tm.local.example`
 - `install.sh`
 - `setup`
 - `setup-luis`
-- `docs/tm-shortcuts.md`
 - OS package hints under `os/`
 
 ## AI Agent Notes
@@ -69,7 +62,7 @@ The installer detects `macos`, `linux`, `wsl`, or `windows`.
 - `./setup` prompts before installing optional tools: Codex, Claude, and `spotify_player`
 - `./setup-luis` installs those optional tools without prompting
 - updates existing supported tools by default; set `DOTFILES_UPDATE_TOOLS=0` to only install missing Linux release/script tools
-- macOS uses `brew bundle`
+- macOS uses `brew bundle`; when `NVM_DIR` is set (nvm machines) the installer skips the Brewfile's `node` so Homebrew Node does not shadow nvm
 - Linux/WSL uses `apt-get`, `dnf`, or `yum`; this covers Amazon Linux on EC2 through `dnf`/`yum`
 - Linux installs or updates Neovim from the official release archive under `~/.local/opt`, avoiding older distro packages
 - Amazon Linux enables an EC2 compatibility path: it checks for low disk or inode headroom, cleans package caches and old journal entries when needed, installs current Rust/Cargo through `rustup`, installs a pinned Zig release into `~/.local/bin`, builds `tree-sitter-cli` locally into `~/.local/bin`, and points Mason's `tree-sitter` shim at that local binary to avoid glibc-mismatched prebuilt releases
@@ -78,8 +71,9 @@ The installer detects `macos`, `linux`, `wsl`, or `windows`.
 - Linux installs or updates ripgrep (`rg`) and fd from official release archives when distro packages are missing or stale
 - Linux also installs or updates lazygit, starship, zoxide, and Atuin through upstream install scripts/releases when packages are not available
 - Mutagen installs through Homebrew on macOS or from its official release archive on Linux/WSL
-- pnpm installs/updates through npm into `$HOME/.local`
-- Codex and Claude CLIs install/update through npm into `$HOME/.local` only when selected
+- pnpm installs/updates through npm into `$HOME/.local`; when `NVM_DIR` is set the installer leaves the npm prefix alone so nvm keeps working
+- Codex installs/updates through Homebrew on macOS, and through npm into `$HOME/.local` on other platforms, only when selected
+- Claude CLI installs/updates through npm into `$HOME/.local` only when selected
 - `spotify_player` installs through Homebrew on macOS when available, or through Cargo on Linux/WSL
 - pnpm defaults to `pnpm@10` to avoid `pnpm@11` requiring Node `>=22.13`; override with `DOTFILES_PNPM_SPEC=pnpm@latest`
 - Rust installs through `rustup` on Linux so Amazon Linux does not use its older repo `rustc`; the default minimum is `1.74.1`, override with `DOTFILES_RUST_MIN_VERSION`
@@ -88,13 +82,10 @@ The installer detects `macos`, `linux`, `wsl`, or `windows`.
 - after package work, it reports any remaining Homebrew, Linux package-manager, or npm global updates it can see
 - links `.ignore` to `~/.ignore`
 - links global agent instructions through `~/AGENTS.md` for Codex and Claude entrypoints
-- merges tmux lifecycle handlers into `~/.codex/hooks.json` and `~/.claude/settings.json` without replacing other hooks
-- requires Python 3.9 or newer for the tmux AI attention watcher and hook merger
 - links the universal Claude workflow agents individually under `~/.claude/agents/`
-- macOS/Linux/WSL: links `.tmux.conf` and the Herdr config at `~/.config/herdr/config.toml`
+- macOS/Linux/WSL: links the Herdr config at `~/.config/herdr/config.toml`
 - macOS: links Ghostty and lazygit from their `~/Library/Application Support/...` locations
 - Linux/WSL: links Ghostty and lazygit under `~/.config/...`
-- Windows: skips tmux because native Windows does not match tmux/zsh behavior well
 - zsh setup is automatic: `install.sh` adds a managed block to `~/.zshrc`
 - that block adds this repo's `scripts/` folder to PATH and sources `zsh_stuff`
 - Existing files are moved to `~/.dotfiles-backup/<timestamp>/`
@@ -116,42 +107,6 @@ source "/path/to/dotfiles/zsh_stuff"
 Run `theme` to choose from eight shared palettes for Ghostty, Herdr, Neovim, Starship, Atuin, bat, Spotify, Codex, and Claude: Catppuccin Mocha/Latte, Gruvbox Dark/Light, Dracula, Nord, and Solarized Dark/Light.
 Lazygit uses terminal colors, and fzf explicitly selects its `base16` palette.
 See [the selector guide](docs/theme-selector.md) for the Herdr popup, first-use steps, refresh behavior, and recovery.
-The existing tmux configuration remains independently configured with Gruvbox Dark.
-
-## tm Shortcuts
-
-`scripts/tm` is public and generic. It supports `tm <path>` for any project directory, and it loads ignored private shortcuts from `scripts/tm.local` when that file exists.
-
-To add machine-specific shortcuts without publishing repo names or paths:
-
-```sh
-cp scripts/tm.local.example scripts/tm.local
-```
-
-Then edit `scripts/tm.local`. See `docs/tm-shortcuts.md` for the shortcut contract and an AI prompt you can reuse on another machine.
-
-List running Codex and Claude panes, or jump to one by list number, exact tmux target, pane ID, or unique text match:
-
-```sh
-tm agent list
-tm agent jump 1
-```
-
-## AI Attention in tmux
-
-`scripts/tmux-ai-attention` keeps each pane's always-visible header current with its pane number, tool, optional role, and AI attention state; the focused project appears once in the top status bar.
-The active pane uses a peach header and border.
-Pane headers show `! INPUT`, `● working`, `✓ done`, or `○ idle`; AI window tabs aggregate those states as `!` for input, `●` for working, and `✓` when no pane needs attention.
-It starts automatically from `.tmux.conf` and only sounds for background panes when they transition to input or done.
-Codex and Claude state comes from supported JSON lifecycle hooks; `Stop` and `SubagentStop` mark the pane done, while their corresponding start events mark it working.
-These are attention states, not proof that a model is actively generating or that all background work has finished.
-Visible-screen matching remains only as a compatibility fallback for older or unhooked panes.
-Codex asks once to review newly installed hooks; after they are trusted, new Codex panes use structured state automatically.
-Use `tmux-ai-attention test` to verify the notification sounds.
-`Ctrl-a a` opens tmux's window picker.
-`Ctrl-a y` opens lazygit, `Ctrl-a Ctrl-s` opens `spotify_player`, and `Ctrl-a t` opens a login shell in a popup rooted at the focused pane's directory.
-`Ctrl-a N` toggles AI request and completion sounds without disabling visual state tracking.
-`Ctrl-a R` sets an optional role such as `implement`, `review`, or `commands` on the focused pane; submit a blank role to hide it.
 
 ## Remote Commands
 
@@ -182,7 +137,6 @@ See `docs/mutagen-remote-workflow.md` for the safety checks, endpoint mapping, a
 ## Current local links
 
 ```sh
-~/.tmux.conf -> ~/dev/dotfiles/.tmux.conf
 ~/.ignore -> ~/dev/dotfiles/.ignore
 ~/AGENTS.md -> ~/dev/dotfiles/config/agents/AGENTS.md
 ~/CLAUDE.md -> ~/AGENTS.md
@@ -208,7 +162,6 @@ See `docs/mutagen-remote-workflow.md` for the safety checks, endpoint mapping, a
 - Atuin history database, keys, and session files
 - spotify-player cache, logs, and auth credentials
 - GitHub auth and global `.gitconfig`
-- private tmux shortcuts in `scripts/tm.local`
 
 ## Packages
 

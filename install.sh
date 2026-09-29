@@ -50,10 +50,10 @@ tool_updates_enabled() {
 managed_tools_for_os() {
     case "$1" in
         macos)
-            printf '%s\n' git zsh tmux lazygit starship zoxide atuin nvim node npm pnpm gh rg fd eza bat jq fzf mutagen
+            printf '%s\n' git zsh lazygit starship zoxide atuin nvim node npm pnpm gh rg fd eza bat jq fzf mutagen
             ;;
         linux|wsl)
-            printf '%s\n' git zsh tmux lazygit starship zoxide atuin nvim rustc cargo zig tree-sitter node npm pnpm gh rg fd eza bat jq fzf mutagen
+            printf '%s\n' git zsh lazygit starship zoxide atuin nvim rustc cargo zig tree-sitter node npm pnpm gh rg fd eza bat jq fzf mutagen
             ;;
         windows)
             printf '%s\n' git node npm pnpm gh lazygit starship zoxide nvim rg fd eza bat jq fzf
@@ -107,9 +107,6 @@ tool_version() {
     case "$tool" in
         zsh)
             output=$(zsh --version 2>/dev/null || true)
-            ;;
-        tmux)
-            output=$(tmux -V 2>/dev/null || true)
             ;;
         nvim)
             output=$(nvim --version 2>/dev/null || true)
@@ -194,7 +191,7 @@ print_update_candidates() {
                     printf '  ok: apt packages current\n'
                 fi
             elif command -v dnf >/dev/null 2>&1; then
-                output=$(dnf check-update git zsh tmux nodejs npm jq ripgrep fd-find fzf bat gh eza xz 2>/dev/null || true)
+                output=$(dnf check-update git zsh nodejs npm jq ripgrep fd-find fzf bat gh eza xz 2>/dev/null || true)
                 if [ -n "$output" ]; then
                     printf '  dnf updates still available for managed packages:\n'
                     print_limited_output "$output" 20
@@ -202,7 +199,7 @@ print_update_candidates() {
                     printf '  ok: dnf managed packages current\n'
                 fi
             elif command -v yum >/dev/null 2>&1; then
-                output=$(yum check-update git zsh tmux nodejs npm jq ripgrep fd-find fzf bat gh eza xz 2>/dev/null || true)
+                output=$(yum check-update git zsh nodejs npm jq ripgrep fd-find fzf bat gh eza xz 2>/dev/null || true)
                 if [ -n "$output" ]; then
                     printf '  yum updates still available for managed packages:\n'
                     print_limited_output "$output" 20
@@ -405,11 +402,6 @@ link_workflow_skills() {
     return "$conflicts"
 }
 
-install_tmux_ai_hooks() {
-    TMUX_HOOKS_BACKUP_DIR="$BACKUP_DIR" "$DOTFILES_DIR/scripts/tmux-ai-attention" install-hooks codex
-    TMUX_HOOKS_BACKUP_DIR="$BACKUP_DIR" "$DOTFILES_DIR/scripts/tmux-ai-attention" install-hooks claude
-}
-
 print_missing() {
     local missing=()
     local tool
@@ -439,7 +431,7 @@ print_package_hint() {
             ;;
         windows)
             printf '  See %s/os/windows/winget-packages.txt\n' "$DOTFILES_DIR"
-            printf '  For tmux/zsh parity, use WSL and run this installer inside WSL.\n'
+            printf '  For zsh parity, use WSL and run this installer inside WSL.\n'
             ;;
         *)
             printf '  No package list for this OS yet.\n'
@@ -1226,17 +1218,22 @@ install_macos_packages() {
     fi
 
     brew update || printf 'warn: brew update failed; continuing\n'
-    brew bundle --file "$DOTFILES_DIR/os/macos/Brewfile" || printf 'warn: brew bundle failed; continuing\n'
+    if uses_nvm; then
+        # Skip Homebrew node so it does not shadow the nvm-managed Node.
+        grep -v '^brew "node"$' "$DOTFILES_DIR/os/macos/Brewfile" | brew bundle --file=- || printf 'warn: brew bundle failed; continuing\n'
+    else
+        brew bundle --file "$DOTFILES_DIR/os/macos/Brewfile" || printf 'warn: brew bundle failed; continuing\n'
+    fi
 }
 
 install_linux_packages() {
     if command -v apt-get >/dev/null 2>&1; then
         run_as_root apt-get update || printf 'warn: apt update failed; continuing\n'
-        install_packages_one_by_one apt-get git zsh tmux curl ca-certificates unzip tar gzip xz-utils build-essential nodejs npm jq ripgrep fd-find fzf bat gh eza
+        install_packages_one_by_one apt-get git zsh curl ca-certificates unzip tar gzip xz-utils build-essential nodejs npm jq ripgrep fd-find fzf bat gh eza
     elif command -v dnf >/dev/null 2>&1; then
-        install_packages_one_by_one dnf git zsh tmux curl ca-certificates unzip tar gzip xz gcc gcc-c++ make nodejs npm jq ripgrep fd-find fzf bat gh eza
+        install_packages_one_by_one dnf git zsh curl ca-certificates unzip tar gzip xz gcc gcc-c++ make nodejs npm jq ripgrep fd-find fzf bat gh eza
     elif command -v yum >/dev/null 2>&1; then
-        install_packages_one_by_one yum git zsh tmux curl ca-certificates unzip tar gzip xz gcc gcc-c++ make nodejs npm jq ripgrep fd-find fzf bat gh eza
+        install_packages_one_by_one yum git zsh curl ca-certificates unzip tar gzip xz gcc gcc-c++ make nodejs npm jq ripgrep fd-find fzf bat gh eza
     else
         printf 'warn: supported package manager not found; skipping OS package install\n'
     fi
@@ -1256,10 +1253,20 @@ install_linux_packages() {
     install_shell_tool_scripts_linux
 }
 
+# nvm owns Node and npm on machines that set NVM_DIR (see ~/.zshrc).
+uses_nvm() {
+    [ -n "${NVM_DIR:-}" ]
+}
+
 setup_npm_prefix() {
     if ! command -v npm >/dev/null 2>&1; then
         printf 'warn: npm not found; skipping npm global installs\n'
         return 1
+    fi
+
+    # nvm keeps globals per Node version and refuses to run with a fixed npm prefix.
+    if uses_nvm; then
+        return 0
     fi
 
     mkdir -p "$HOME/.local"
@@ -1274,6 +1281,17 @@ install_pnpm_cli() {
 }
 
 install_codex_cli() {
+    if [ "$(detect_os)" = "macos" ]; then
+        if ! command -v brew >/dev/null 2>&1; then
+            printf 'warn: Homebrew not found; cannot install Codex CLI\n'
+        elif brew list --cask codex >/dev/null 2>&1; then
+            brew upgrade --cask codex || printf 'warn: failed to upgrade Codex CLI with Homebrew\n'
+        else
+            brew install --cask codex || printf 'warn: failed to install Codex CLI with Homebrew\n'
+        fi
+        return
+    fi
+
     setup_npm_prefix || return
     npm install -g @openai/codex@latest || printf 'warn: failed to install Codex CLI\n'
 }
@@ -1330,7 +1348,7 @@ install_spotify_player() {
             if command -v cargo >/dev/null 2>&1; then
                 install_spotify_player_with_cargo
             else
-                printf 'warn: native Windows spotify_player install needs Cargo or Scoop; WSL is recommended for tmux parity\n'
+                printf 'warn: native Windows spotify_player install needs Cargo or Scoop; WSL is recommended\n'
             fi
             ;;
         *)
@@ -1510,15 +1528,13 @@ main() {
             fi
             ensure_zsh_setup
             link_agent_instructions
-            install_tmux_ai_hooks
             link_file "$DOTFILES_DIR/.ignore" "$HOME/.ignore"
-            link_file "$DOTFILES_DIR/.tmux.conf" "$HOME/.tmux.conf"
             if [ "$os_name" = "macos" ]; then
                 link_macos_configs
-                print_missing zsh tmux lazygit starship zoxide atuin nvim pnpm gh rg fd eza bat jq fzf mutagen
+                print_missing zsh lazygit starship zoxide atuin nvim pnpm gh rg fd eza bat jq fzf mutagen
             else
                 link_linux_configs
-                print_missing zsh tmux lazygit starship zoxide atuin nvim rustc cargo zig tree-sitter pnpm gh rg fd eza bat jq fzf mutagen
+                print_missing zsh lazygit starship zoxide atuin nvim rustc cargo zig tree-sitter pnpm gh rg fd eza bat jq fzf mutagen
             fi
             ;;
         windows)

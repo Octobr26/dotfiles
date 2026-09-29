@@ -12,14 +12,8 @@ This repo is personal shell and terminal setup. Keep changes narrow and preserve
 ## Source of Truth
 
 - Shell startup: `zsh_stuff`
-- tmux config: `.tmux.conf`
-- tmux project launcher: `scripts/tm`
 - worktree frontend preview: `worktree-preview` (installed from the Octobr26/worktree-preview repo)
-- tmux private shortcut example: `scripts/tm.local.example`
-- tmux shortcut guide: `docs/tm-shortcuts.md`
-- tmux AI attention watcher: `scripts/tmux-ai-attention`
-- Codex lifecycle hooks: `config/codex/tmux-hooks.json`
-- Claude lifecycle hooks: `config/claude/tmux-hooks.json`
+- Herdr config: `config/herdr/config.toml`
 - Ghostty config: `config/ghostty/config.ghostty`
 - Global agent instructions: `config/agents/AGENTS.md`
 - Universal agent workflows: `config/agents/workflows/README.md`
@@ -34,9 +28,6 @@ This repo is personal shell and terminal setup. Keep changes narrow and preserve
 ## Local Workflow
 
 - `~/.zshrc` is not owned by this repo. `install.sh` adds a managed block that puts `scripts/` on `PATH` and sources `zsh_stuff`.
-- `Ctrl-a` is the tmux prefix. Common bindings live in `.tmux.conf`.
-- Generic `tm <path>` creates a project session from a directory path.
-- Private `tm <shortcut>` entries live in ignored `scripts/tm.local`; keep real client names and private paths there.
 - `./setup` is the general setup and prompts for optional tools.
 - `./setup-luis` installs Luis' optional tools without prompting.
 
@@ -44,15 +35,13 @@ This repo is personal shell and terminal setup. Keep changes narrow and preserve
 
 - Read `README.md` before changing install behavior or supported platforms.
 - Inspect `git status -sb` before editing. Do not stage unrelated user changes.
-- For terminal behavior questions, identify the layer first: Ghostty, zsh, tmux, or helper script.
+- For terminal behavior questions, identify the layer first: Ghostty, zsh, Herdr, or helper script.
 - Prefer changing the actual source file in this repo over editing symlink targets elsewhere.
 - For workflow, skill, or agent-instruction edits, read `config/agents/workflows/instruction-writing.md`.
 - Do not add secrets, shell history databases, Atuin keys, GitHub auth, lazygit state, or global `.gitconfig`.
-- Keep private workflow shortcuts consistent with `scripts/tm.local.example` and document reusable patterns in `docs/tm-shortcuts.md`.
 
 ## Verification
 
 - Always run `git diff --check` before finishing.
 - When touching shell scripts, run `bash -n <script>`.
-- When touching `scripts/tm` shortcut dispatch, run `bash tests/tm-local-shortcuts.sh`.
 - When checking sync after push, use `git rev-list --left-right --count origin/main...main`.

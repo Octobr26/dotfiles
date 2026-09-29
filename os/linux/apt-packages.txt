@@ -12,7 +12,6 @@ nodejs
 npm
 ripgrep
 starship
-tmux
 xz-utils
 zoxide
 zsh
