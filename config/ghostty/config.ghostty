@@ -9,5 +9,7 @@ mouse-hide-while-typing = true
 window-decoration = auto
 macos-option-as-alt = true
 font-family = "JetBrainsMono Nerd Font"
+font-thicken = true
+font-feature = +calt
 window-padding-x = 12
 window-padding-y = 10
