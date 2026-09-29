@@ -1,7 +1,7 @@
 onboarding = false
 
 [theme]
-name = "catppuccin"
+name = "catppuccin-latte"
 auto_switch = false
 
 [keys]
@@ -34,8 +34,8 @@ show_agent_labels_on_pane_borders = true
 [ui.sidebar.agents]
 row_gap = 1
 rows = [
-  ["state_icon", { token = "tab", fg = "#cdd6f4", bold = true, dim = false }],
-  [{ token = "workspace", fg = "#a6adc8", bold = false, dim = false }, "state_text"],
+  ["state_icon", { token = "tab", fg = "#4c4f69", bold = true, dim = false }],
+  [{ token = "workspace", fg = "#6c6f85", bold = false, dim = false }, "state_text"],
 ]
 
 [ui.toast]
@@ -45,7 +45,7 @@ delivery = "system"
 [[keys.command]]
 key = "prefix+t"
 type = "popup"
-command = "exec theme"
+command = "exec zsh -ic 'exec theme'"
 description = "shared themes"
 width = "85%"
 height = "75%"

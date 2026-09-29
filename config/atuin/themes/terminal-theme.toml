@@ -2,3 +2,5 @@
 [theme]
 name = "terminal-theme"
 parent = "gruvbox-dark"
+
+[colors]

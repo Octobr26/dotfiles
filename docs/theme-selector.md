@@ -42,13 +42,14 @@ For an installation using its own Herdr config, add the following with an unoccu
 [[keys.command]]
 key = "prefix+t"
 type = "popup"
-command = "exec theme"
+command = "exec zsh -ic 'exec theme'"
 description = "shared themes"
 width = "85%"
 height = "75%"
 ```
 
 Validate with `herdr config check`, then use `herdr server reload-config` inside Herdr.
+The popup starts interactive zsh so it loads the dotfiles PATH from `~/.zshrc`, even when the Herdr server was launched with only the system PATH.
 The picker also works directly in a terminal without Herdr.
 It requires fzf and Python 3.11 or newer; the launcher handles macOS putting its older system Python first in PATH.
 
