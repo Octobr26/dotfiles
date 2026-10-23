@@ -1,7 +1,7 @@
 onboarding = false
 
 [theme]
-name = "catppuccin-latte"
+name = "dracula"
 auto_switch = false
 
 [keys]
@@ -34,8 +34,8 @@ show_agent_labels_on_pane_borders = true
 [ui.sidebar.agents]
 row_gap = 1
 rows = [
-  ["state_icon", { token = "tab", fg = "#4c4f69", bold = true, dim = false }],
-  [{ token = "workspace", fg = "#6c6f85", bold = false, dim = false }, "state_text"],
+  ["state_icon", { token = "tab", fg = "#f8f8f2", bold = true, dim = false }],
+  [{ token = "workspace", fg = "#6272a4", bold = false, dim = false }, "state_text"],
 ]
 
 [ui.toast]
