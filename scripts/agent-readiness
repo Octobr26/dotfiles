@@ -1,0 +1,494 @@
+#!/usr/bin/env python3
+"""Check private behavior evidence before implementation or a readiness verdict."""
+import argparse
+import fnmatch
+import hashlib
+import json
+import os
+from pathlib import Path
+import re
+import selectors
+import signal
+import subprocess
+import sys
+import tempfile
+import time
+import uuid
+
+SCENARIOS = ('producer_consumer', 'transitions', 'time_and_data', 'shared_consumers', 'rendered_outputs', 'integration')
+CONTEXT_KEYS = ('TZ', 'LANG', 'LC_ALL', 'NODE_ENV', 'CI')
+OUTPUT_LIMIT = 2 * 1024 * 1024
+
+
+def digest(data):
+    return hashlib.sha256(data).hexdigest()
+
+
+def git(repo, *args):
+    return subprocess.check_output(['git', '-C', str(repo), *args], stderr=subprocess.PIPE)
+
+
+def snapshot(repo):
+    repo = Path(git(repo, 'rev-parse', '--show-toplevel').decode().strip()).resolve()
+    head = git(repo, 'rev-parse', 'HEAD').decode().strip()
+    paths = set(git(repo, 'ls-files', '-z', '--cached', '--others', '--exclude-standard').split(b'\0')) - {b''}
+    parts = [git(repo, 'diff', '--cached', '--binary', 'HEAD')]
+    for name in sorted(paths):
+        path = repo / os.fsdecode(name)
+        if path.is_symlink():
+            content = b'link:' + os.fsencode(os.readlink(path))
+        elif path.is_file():
+            content = b'file:' + path.read_bytes()
+        elif path.exists():
+            raise ValueError('Cannot fingerprint directory/submodule: ' + os.fsdecode(name))
+        else:
+            content = b'deleted'
+        mode = str(path.lstat().st_mode).encode() if path.exists() or path.is_symlink() else b'0'
+        parts.append(name + b'\0' + mode + b'\0' + digest(content).encode())
+    return {'repository': str(repo), 'head': head, 'tree': digest(b'\0'.join(parts))}
+
+
+def save(path, value):
+    path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+    fd, name = tempfile.mkstemp(dir=path.parent)
+    try:
+        with os.fdopen(fd, 'w') as stream:
+            json.dump(value, stream, indent=2)
+            stream.write('\n')
+        os.replace(name, path)
+    finally:
+        if os.path.exists(name):
+            os.unlink(name)
+
+
+def load(path):
+    value = json.loads(path.read_text())
+    if not isinstance(value, dict) or value.get('version') != 1:
+        raise ValueError('Expected a version 1 readiness record; use init.')
+    return value
+
+
+def outside_repo(path, repo):
+    if path.resolve().is_relative_to(Path(repo).resolve()):
+        raise ValueError('Keep readiness records and captured output outside the target repository.')
+
+
+def probe_policy_path(record):
+    repo = record['repository']
+    try:
+        remote = git(repo, 'config', '--get', 'remote.origin.url').decode().strip()
+    except subprocess.CalledProcessError:
+        remote = ''
+    name = remote.rstrip('/').rsplit('/', 1)[-1].rsplit(':', 1)[-1]
+    name = name.removesuffix('.git')
+    automatic = Path.home() / '.config/agent-context' / name / 'readiness-probes.json'
+    explicit = record.get('probe_policy')
+    discovered = automatic if name and re.fullmatch(r'[A-Za-z0-9_.-]+', name) and automatic.is_file() else None
+    if discovered and explicit and Path(explicit).resolve() != discovered.resolve():
+        raise ValueError('Explicit policy cannot replace the discovered project probe policy.')
+    return Path(explicit) if explicit else discovered
+
+
+def required_probes(record):
+    repo = record['repository']
+    policy_path = probe_policy_path(record)
+    if not policy_path:
+        return []
+    policy_bytes = policy_path.read_bytes()
+    policy = json.loads(policy_bytes)
+    if policy.get('version') != 1 or not isinstance(policy.get('probes'), list):
+        raise ValueError('Expected version 1 probe policy with a probes list: ' + str(policy_path))
+    changed = set(git(repo, 'diff', '--name-only', '-z', record['merge_base']).split(b'\0'))
+    changed.update(git(repo, 'ls-files', '--others', '--exclude-standard', '-z').split(b'\0'))
+    selected = []
+    ids = set()
+    for probe in policy['probes']:
+        identifier = probe.get('id')
+        if not isinstance(identifier, str) or not identifier or identifier in ids:
+            raise ValueError('Probe IDs must be unique nonempty strings.')
+        ids.add(identifier)
+        patterns, argv = probe.get('paths'), probe.get('argv')
+        if not isinstance(patterns, list) or not patterns or not all(isinstance(x, str) and x for x in patterns):
+            raise ValueError('Probe paths must be nonempty glob strings.')
+        if not isinstance(argv, list) or not argv or not all(isinstance(x, str) and x for x in argv):
+            raise ValueError('Probe argv must be a nonempty list of strings.')
+        if any(fnmatch.fnmatchcase(os.fsdecode(file), pattern) for file in changed if file for pattern in patterns):
+            files = probe.get('files', [])
+            if not isinstance(files, list) or not all(isinstance(x, str) and Path(x).is_absolute() for x in files):
+                raise ValueError('Probe files must be absolute paths to its verification program.')
+            hashes = {file: digest(Path(file).read_bytes()) for file in files}
+            binding = digest(policy_bytes + json.dumps(hashes, sort_keys=True).encode())
+            selected.append({**probe, 'policy': str(policy_path.resolve()), 'fingerprint': binding})
+    return selected
+
+
+def initialize(args):
+    state = snapshot(args.repo)
+    base = git(state['repository'], 'rev-parse', args.base + '^{commit}').decode().strip()
+    actor = args.actor or os.environ.get('CODEX_SESSION_ID') or os.environ.get('CLAUDE_SESSION_ID')
+    if not actor:
+        raise ValueError('Supply --actor with the author/coordinator session identity.')
+    path = args.record or Path.home() / '.local/state/agent-workflow/readiness' / (str(uuid.uuid4()) + '.json')
+    outside_repo(path, state['repository'])
+    if path.exists():
+        raise ValueError('Record already exists; refusing to replace it.')
+    value = {
+        'version': 1, 'task': args.task, 'mode': args.mode, 'actor': actor,
+        'repository': state['repository'], 'base': base,
+        'merge_base': git(state['repository'], 'merge-base', base, state['head']).decode().strip(),
+        'initial_state': state,
+        'applicability': {key: {'applies': None, 'reason': '', 'cases': []} for key in SCENARIOS},
+        'cases': [], 'findings': [], 'captures': {}, 'reviews': [],
+        'probe_policy': str(args.probe_policy.resolve()) if args.probe_policy else None, 'probe_results': {},
+    }
+    policy = probe_policy_path(value)
+    value['probe_policy'] = str(policy.resolve()) if policy else None
+    save(path, value)
+    print(path)
+    return 0
+
+
+def capture(args):
+    record = load(args.record)
+    outside_repo(args.record, record['repository'])
+    if not re.fullmatch(r'[A-Za-z0-9_.-]+', args.id) or args.id in record['captures']:
+        raise ValueError('Use a new capture ID containing letters, digits, dots, underscores or hyphens.')
+    command = args.argv[1:] if args.argv[:1] == ['--'] else args.argv
+    if not command:
+        raise ValueError('Supply the command argv after --.')
+    if not 0.05 <= args.timeout <= 3600:
+        raise ValueError('Timeout must be between 0.05 and 3600 seconds.')
+    cases = {case['id'] for case in record['cases']}
+    if not args.case or not set(args.case) <= cases:
+        raise ValueError('Bind the capture to existing case IDs using --case.')
+    if args.kind == 'review' and (not args.reviewer or args.reviewer == record['actor']):
+        raise ValueError('Review capture needs a distinct --reviewer session identity.')
+    before = snapshot(record['repository'])
+    cwd = (Path(record['repository']) / args.cwd).resolve()
+    if not cwd.is_relative_to(Path(record['repository'])):
+        raise ValueError('Capture cwd must be inside the target repository.')
+    env = dict(os.environ)
+    for setting in args.env:
+        key, separator, value = setting.partition('=')
+        if not separator or not re.fullmatch(r'[A-Za-z_][A-Za-z0-9_]*', key):
+            raise ValueError('Environment overrides use NAME=value.')
+        env[key] = value
+    context = {key: env.get(key) for key in set(CONTEXT_KEYS) | {x.partition('=')[0] for x in args.env}}
+    probe_bindings = {probe['id']: probe['fingerprint'] for probe in required_probes(record) if probe['argv'] == command}
+    folder = args.record.parent / (args.record.stem + '.evidence')
+    folder.mkdir(mode=0o700, exist_ok=True)
+    started = time.monotonic()
+    timed_out = truncated = False
+    with tempfile.TemporaryFile(dir=folder) as output:
+        process = subprocess.Popen(command, cwd=cwd, env=env, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                                   start_new_session=True, shell=False)
+        selector = selectors.DefaultSelector()
+        os.set_blocking(process.stdout.fileno(), False)
+        selector.register(process.stdout, selectors.EVENT_READ)
+        pipe_open = True
+        try:
+            while pipe_open or process.poll() is None:
+                timed_out = time.monotonic() - started >= args.timeout
+                if timed_out:
+                    break
+                for key, _ in selector.select(timeout=0.02):
+                    chunk = os.read(key.fileobj.fileno(), 65536)
+                    if not chunk:
+                        selector.unregister(key.fileobj)
+                        pipe_open = False
+                        continue
+                    available = OUTPUT_LIMIT - output.tell()
+                    output.write(chunk[:available])
+                    if len(chunk) > available:
+                        truncated = True
+                        break
+                if truncated:
+                    break
+        finally:
+            # Capture owns its process group, including workers surviving their parent.
+            try:
+                os.killpg(process.pid, signal.SIGKILL)
+            except ProcessLookupError:
+                pass
+            process.wait()
+            selector.close()
+            process.stdout.close()
+        output.seek(0)
+        content = output.read(OUTPUT_LIMIT)
+    after = snapshot(record['repository'])
+    bindings = {}
+    if args.kind == 'review':
+        report = json.loads(content)
+        if report.get('reviewer') != args.reviewer:
+            raise ValueError('Reviewer JSON identity must match --reviewer.')
+        references = report.get('evidence')
+        if not isinstance(references, list) or not references:
+            raise ValueError('Review output must reference existing captured evidence.')
+        for name in references:
+            item = record['captures'].get(name)
+            if not item or item.get('kind') not in ('source', 'baseline', 'check'):
+                raise ValueError('Review references absent or unsupported evidence: ' + str(name))
+            data = Path(item['artifact']).read_bytes()
+            if digest(data) != item.get('sha256'):
+                raise ValueError('Review references altered evidence: ' + name)
+            if item.get('before') != item.get('after') or (item['kind'] != 'baseline' and item['after'] != before):
+                raise ValueError('Review references unstable or stale evidence: ' + name)
+            bindings[name] = digest(json.dumps(item, sort_keys=True).encode())
+    sha = digest(content)
+    artifact = folder / (sha + '.bin')
+    if not artifact.exists():
+        fd = os.open(artifact, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+        with os.fdopen(fd, 'wb') as stream:
+            stream.write(content)
+    record['captures'][args.id] = {
+        'kind': args.kind, 'cases': args.case, 'argv': command,
+        'cwd': str(cwd.relative_to(Path(record['repository']))), 'context': context,
+        'before': before, 'after': after, 'exit_code': process.returncode,
+        'timed_out': timed_out, 'truncated': truncated, 'seconds': round(time.monotonic() - started, 3),
+        'sha256': sha, 'artifact': str(artifact.resolve()), 'reviewer': args.reviewer,
+        'review_bindings': bindings,
+        'probe_bindings': probe_bindings,
+    }
+    save(args.record, record)
+    valid = before == after and not timed_out and not truncated
+    print(json.dumps({'capture': args.id, 'exit_code': process.returncode, 'stable': before == after,
+                      'timed_out': timed_out, 'truncated': truncated, 'artifact': str(artifact)}))
+    return 0 if valid and process.returncode == 0 else 1
+
+
+def text(value):
+    return isinstance(value, str) and bool(value.strip())
+
+
+def check(args):
+    record = load(args.record)
+    outside_repo(args.record, record['repository'])
+    errors = []
+    cases = record.get('cases', [])
+    if not text(record.get('task')) or not text(record.get('actor')) or record.get('mode') not in ('review', 'implementation'):
+        errors.append('Task, actor and mode are required.')
+    if not isinstance(cases, list) or not cases:
+        errors.append('At least one discriminating behavior case is required.')
+        cases = []
+    ids = [case.get('id') for case in cases]
+    if any(not text(x) for x in ids) or len(set(ids)) != len(ids):
+        errors.append('Case IDs must be nonempty and unique.')
+    covered = set()
+    for key in SCENARIOS:
+        applicability = record.get('applicability', {}).get(key, {})
+        if type(applicability.get('applies')) is not bool or not text(applicability.get('reason')):
+            errors.append(key + ': decide applies or n/a, with the concrete diff reason.')
+        selected = applicability.get('cases', [])
+        if not isinstance(selected, list) or not set(selected) <= set(ids):
+            errors.append(key + ': references unknown cases.')
+        elif applicability.get('applies'):
+            if not selected:
+                errors.append(key + ': applicable behavior has no case.')
+            covered.update(selected)
+        elif selected:
+            errors.append(key + ': n/a cannot claim covered cases.')
+    if set(ids) - covered:
+        errors.append('Cases missing applicability coverage: ' + ', '.join(str(x) for x in set(ids) - covered))
+    for case in cases:
+        for field in ('authority', 'input', 'expected', 'check'):
+            if not text(case.get(field)):
+                errors.append(str(case.get('id')) + ': missing ' + field)
+        if case.get('authority_status') != 'confirmed':
+            errors.append(str(case.get('id')) + ': authority must be explicitly confirmed by evidence or a decision.')
+        if case.get('method') not in ('runtime', 'source'):
+            errors.append(str(case.get('id')) + ': method must be runtime or source.')
+        if record.get('mode') == 'implementation' and case.get('method') == 'runtime' and not text(case.get('failure')):
+            errors.append(str(case.get('id')) + ': specify the intended failing assertion.')
+    current = snapshot(record['repository'])
+    probes = required_probes(record)
+    contents = {}
+    captures = record.get('captures', {})
+
+    def evidence(name, kind, case_id=None, current_required=True):
+        item = captures.get(name)
+        if not item or item.get('kind') != kind:
+            errors.append(str(name) + ': missing ' + kind + ' capture.')
+            return None
+        try:
+            data = Path(item['artifact']).read_bytes()
+        except (OSError, KeyError):
+            errors.append(str(name) + ': missing captured artifact.')
+            return None
+        if digest(data) != item.get('sha256') or not data.strip():
+            errors.append(str(name) + ': empty or changed captured artifact.')
+        if item.get('before') != item.get('after') or item.get('timed_out') or item.get('truncated'):
+            errors.append(str(name) + ': capture changed code, timed out or exceeded output limit.')
+        if current_required and item.get('after') != current:
+            errors.append(str(name) + ': evidence is stale for the current HEAD/worktree.')
+        if case_id and case_id not in item.get('cases', []):
+            errors.append(str(name) + ': does not cover case ' + case_id)
+        if kind != 'baseline' and item.get('exit_code') != 0:
+            errors.append(str(name) + ': command did not succeed.')
+        contents[name] = data
+        return item
+
+    for case in cases:
+        evidence(case.get('authority_source'), 'source', case.get('id'))
+        evidence(case.get('source'), 'source', case.get('id'))
+    specification = {'mode': record.get('mode'), 'probes': probes, 'applicability': record.get('applicability'), 'cases': [
+        {key: case.get(key) for key in ('id', 'authority', 'authority_status', 'input', 'expected', 'check', 'method', 'failure')}
+        for case in cases]}
+    specification_hash = digest(json.dumps(specification, sort_keys=True).encode())
+    if args.phase == 'plan' and not errors:
+        record['plan'] = {'state': current, 'specification_sha256': specification_hash}
+        save(args.record, record)
+    if args.phase == 'final':
+        if record.get('plan', {}).get('specification_sha256') != specification_hash:
+            errors.append('Missing or changed plan: run plan check on the sourced expectations before implementation.')
+        required = set()
+        case_evidence = {}
+        for case in cases:
+            case_id = case['id']
+            if not text(case.get('observed')):
+                errors.append(case_id + ': missing observed result.')
+            source = case.get('source')
+            authority = case.get('authority_source')
+            evidence(source, 'source', case_id)
+            required.update((source, authority))
+            case_evidence[case_id] = {source, authority}
+            if case.get('method') == 'runtime':
+                result_id = case.get('result')
+                result = evidence(result_id, 'check', case_id)
+                required.add(result_id)
+                case_evidence[case_id].add(result_id)
+                if record.get('mode') == 'implementation':
+                    baseline_id = case.get('baseline')
+                    baseline = evidence(baseline_id, 'baseline', case_id, False)
+                    required.add(baseline_id)
+                    case_evidence[case_id].add(baseline_id)
+                    if baseline and result:
+                        if not isinstance(baseline.get('exit_code'), int) or baseline['exit_code'] == 0:
+                            errors.append(case_id + ': baseline must fail.')
+                        if case.get('failure', '').encode() not in contents.get(baseline_id, b''):
+                            errors.append(case_id + ': baseline did not show the specified assertion failure.')
+                        if any(baseline.get(k) != result.get(k) for k in ('argv', 'cwd', 'context')):
+                            errors.append(case_id + ': baseline/final command, cwd or environment differ.')
+                        if baseline['after'] == result['after']:
+                            errors.append(case_id + ': baseline and final code are identical.')
+                        if baseline['after']['head'] != record['initial_state']['head']:
+                            errors.append(case_id + ': baseline is not at the original HEAD.')
+                        if baseline['after'] != record.get('plan', {}).get('state'):
+                            errors.append(case_id + ': baseline differs from the planned source state.')
+            elif record.get('mode') == 'implementation':
+                errors.append(case_id + ': source-only implementation verification remains incomplete in this pilot.')
+        for finding in record.get('findings', []):
+            if finding.get('kind') not in ('blocker', 'decision', 'nonblocking'):
+                errors.append('Finding requires blocker, decision or nonblocking kind.')
+            if finding.get('status') not in ('open', 'fixed', 'refuted', 'deferred'):
+                errors.append('Finding requires an explicit disposition.')
+            if not text(finding.get('reason')):
+                errors.append('Finding disposition requires a reason.')
+            if finding.get('kind') != 'nonblocking' and finding.get('status') not in ('fixed', 'refuted'):
+                errors.append(str(finding.get('id')) + ': unresolved blocker or decision.')
+            refs = finding.get('evidence', [])
+            if not refs:
+                errors.append(str(finding.get('id')) + ': disposition has no evidence.')
+            for name in refs:
+                kind = captures.get(name, {}).get('kind')
+                if kind not in ('source', 'check'):
+                    errors.append(str(name) + ': disposition needs current source or check evidence.')
+                else:
+                    evidence(name, kind)
+                required.add(name)
+        reviewed = set()
+        reviewed_evidence = set()
+        for probe in probes:
+            name = record.get('probe_results', {}).get(probe['id'])
+            if not name:
+                errors.append('Required project probe has no result: ' + probe['id'])
+                continue
+            item = evidence(name, 'check')
+            required.add(name)
+            if item:
+                if item.get('probe_bindings', {}).get(probe['id']) != probe['fingerprint']:
+                    errors.append(probe['id'] + ': probe implementation or policy changed since capture.')
+                if item.get('argv') != probe['argv'] or item.get('cwd') != '.':
+                    errors.append(probe['id'] + ': capture must execute the registered probe argv at repository root.')
+                try:
+                    result = json.loads(contents[name])
+                    accepted = result.get('status') == 'pass' or (probe.get('allow_not_applicable') is True and result.get('status') == 'not_applicable')
+                    if result.get('probe') != probe['id'] or not accepted:
+                        errors.append(probe['id'] + ': required semantic probe did not pass.')
+                except (ValueError, AttributeError):
+                    errors.append(probe['id'] + ': probe must return its JSON identity and pass status.')
+        for name in record.get('reviews', []):
+            item = captures.get(name, {})
+            if evidence(name, 'review') is None:
+                continue
+            try:
+                review = json.loads(contents[name])
+            except (ValueError, KeyError):
+                errors.append(name + ': reviewer output must be JSON.')
+                continue
+            identity = item.get('reviewer')
+            if not identity or identity == record['actor'] or review.get('reviewer') != identity:
+                errors.append(name + ': distinct reviewer identity is required (declared, not authenticated).')
+            if review.get('verdict') != 'accept':
+                errors.append(name + ': reviewer has not accepted the evidence.')
+            references = set(review.get('evidence', []))
+            if references != set(item.get('review_bindings', {})):
+                errors.append(name + ': review references differ from its captured bindings.')
+            for reference, bound in item.get('review_bindings', {}).items():
+                manifest = captures.get(reference)
+                if not manifest or digest(json.dumps(manifest, sort_keys=True).encode()) != bound:
+                    errors.append(name + ': reviewed evidence was changed after assessment: ' + reference)
+            reviewed_evidence.update(references)
+            for case_id, assessment in review.get('cases', {}).items():
+                if case_id in ids and assessment.get('status') == 'verified' and text(assessment.get('reason')):
+                    if not case_evidence[case_id] <= references:
+                        errors.append(name + ': reviewer did not account for case evidence: ' + case_id)
+                    else:
+                        reviewed.add(case_id)
+                else:
+                    errors.append(name + ': case remains unresolved or unsupported: ' + case_id)
+        if set(ids) - reviewed:
+            errors.append('Missing independent assessment for: ' + ', '.join(str(x) for x in set(ids) - reviewed))
+        if not required <= reviewed_evidence:
+            errors.append('Review records do not account for all required evidence and finding dispositions.')
+    print(json.dumps({'status': 'EVIDENCE INCOMPLETE' if errors else 'EVIDENCE COMPLETE',
+                      'phase': args.phase, 'errors': errors,
+                      'required_probes': probes,
+                      'limits': 'Checks record completeness, captured output and source state; not semantic truth, authenticated independence or PR approval.'}, indent=2))
+    return 1 if errors else 0
+
+
+def main():
+    os.umask(0o077)
+    parser = argparse.ArgumentParser(description=__doc__)
+    commands = parser.add_subparsers(dest='command', required=True)
+    init = commands.add_parser('init', help='Create a private record; fill cases and applicability before plan check.')
+    init.add_argument('--repo', type=Path, required=True)
+    init.add_argument('--base', required=True, help='Explicit review scope: the actual PR base/ref, or HEAD for uncommitted-only work.')
+    init.add_argument('--task', required=True)
+    init.add_argument('--mode', choices=('implementation', 'review'), required=True)
+    init.add_argument('--actor')
+    init.add_argument('--record', type=Path)
+    init.add_argument('--probe-policy', type=Path, help='Explicit private policy when no project policy is discovered from origin.')
+    run = commands.add_parser('capture', help='Run explicitly authorized argv; capture itself grants no extra execution authority.')
+    run.add_argument('--record', type=Path, required=True)
+    run.add_argument('--id', required=True)
+    run.add_argument('--kind', choices=('source', 'baseline', 'check', 'review'), required=True)
+    run.add_argument('--case', action='append', default=[])
+    run.add_argument('--reviewer')
+    run.add_argument('--cwd', default='.')
+    run.add_argument('--env', action='append', default=[], help='Non-secret environment settings, e.g. TZ=UTC.')
+    run.add_argument('--timeout', type=float, default=300)
+    run.add_argument('argv', nargs=argparse.REMAINDER)
+    verify = commands.add_parser('check', help='Validate without executing recorded commands.')
+    verify.add_argument('--record', type=Path, required=True)
+    verify.add_argument('--phase', choices=('plan', 'final'), required=True)
+    args = parser.parse_args()
+    return initialize(args) if args.command == 'init' else capture(args) if args.command == 'capture' else check(args)
+
+
+if __name__ == '__main__':
+    try:
+        sys.exit(main())
+    except (OSError, ValueError, KeyError, TypeError, subprocess.SubprocessError) as error:
+        print(json.dumps({'status': 'EVIDENCE INCOMPLETE', 'error': str(error)}))
+        sys.exit(1)

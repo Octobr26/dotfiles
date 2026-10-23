@@ -1,0 +1,58 @@
+# Backend behavior evidence
+
+## When to use it
+
+Use for planning, implementing or reviewing changes to backend request, service, query, worker or migration behavior.
+Mechanical edits that preserve execution and contracts keep their existing focused checks.
+Frontend-only work keeps its own scenario selection; this guide applies to the backend side of a coordinated change.
+
+## Job
+
+1. Locate the actual caller, behavior owner, schema/writer and affected consumers at the task revisions.
+   Read project instructions and shared product context; a historical review example is a lead to verify, not a current defect or a new requirement.
+2. Select applicable cases below before choosing assertions, using the [clarification gate](README.md#clarification-gate) for unresolved behavior or ownership.
+   Put the required result, authority, discriminating input/interleaving, production boundary and verification path in the existing plan/evidence record.
+   With the [readiness pilot](readiness.md), map these cases to its existing applicability dimensions; UI-only scenarios can be n/a with the actual diff reason.
+3. Exercise the selected cases during implementation and reassess them against the final revision during review.
+   Keep accepted follow-ups, release prerequisites and unresolved product decisions distinct under the [review workflow](review.md#behavior-evidence-before-a-verdict).
+
+## Backend cases
+
+An invariant is a rule that must remain true, such as a per-organization invite cap.
+Select cases the changed path can affect; account for other areas with a concrete scope reason rather than running an exhaustive matrix.
+
+| Changed behavior | Evidence and discriminating cases |
+| --- | --- |
+| Write permissions or scope | Trace every entry point to the new side effect, including compatibility setters, internal routes and workers. Establish the actual tenant/role gate. Compare an allowed caller with a denied role or another tenant where applicable; a neighboring endpoint's gate does not protect this path. |
+| Multiple writes, check-then-write or retries | Identify the operations sharing a transaction and the protection against competing requests: actual isolation, lock, constraint, compare-and-swap or idempotency key. Challenge failure after a consequential write and a concurrent/repeated request. Distinguish all-or-nothing rollback from serialization of a cap or uniqueness rule. |
+| SQL, mapping or persisted-data interpretation | Derive inputs from the schema and real writers, including applicable null/zero/empty values, legacy duplicates, soft-deleted rows, mixed providers and identifier namespaces. Compare affected readers/writers on the same example. Settle whether existing bad data is repaired here, by a backfill or in an accepted follow-up. Preserve legitimate zero/empty values while checking missing-data provenance. |
+| Migration, backfill or independent deployment | Select applicable already-upgraded, interrupted, retried, rollback and mixed-binary states. Check versions/order against the actual integration target and runtime migration runner; a fresh database or a successful Up covers only that state. Carry a known merge/deploy prerequisite through the final check. |
+| Pagination, scheduled or retrying work | Establish the resource bound and durable progress rule. Where reachable, challenge an empty page with a next token, quota response, interrupted run or missed tick. Check the cursor/watermark on restart and distinguish re-reading overlap from forward progress. A larger budget alone cannot repair repeated work with no durable progress. |
+| API or cross-service contract | Compare final handler/serializer/error behavior with the real consumer and successor-facing documentation, including applicable empty, denied and degraded results. Resolve contradictory expectations from their authority before adapting assertions or weakening safe behavior. Record the service owner and any independent deployment boundary. |
+
+## Limits
+
+Project layering, test and database rules remain authoritative.
+This guide selects evidence within the authorized change; it grants no new fixtures, live database access, cross-repository edits or automatic repair of old data.
+A naming nit, accepted follow-up or documented merge prerequisite is not automatically an implementation blocker.
+Use the original requirement and inspected behavior to assess reviewer feedback, including advice later corrected by the reviewer.
+Keep a proposed repair obligation, service owner or future release prerequisite explicitly proposed until a requirement or authorized decision establishes it.
+
+## Checks
+
+Apply the existing [test and author checks](review.md#test-and-author-checks) to the real backend boundary.
+Trace each changing input through the production query, mapper, SDK or service to its distinguishing assertion.
+A fixture field never read by the mapper, a mock returning the promised query result or a stub ignoring ordering leaves that behavior unverified.
+Inspect ORM/query-builder defaults and schema constraints before requesting extra guards or moving ownership.
+Use the smallest project-permitted check; distinguish rendered SQL and source inspection from executed SQL, and retain any missing runtime evidence required by the readiness pilot.
+
+For each critical case, include a nearby valid control: a real zero beside an unknown default, a valid unchanged row beside duplicate rows, or an unrestricted scope beside an empty restricted scope.
+Passing checks that omit the counterexample do not settle contradictory contract evidence.
+When a review changes the expected result, retain its new authority and recheck the affected cases at the final revision.
+
+## Result
+
+Return the selected cases and their authority, actual check/result/revision, finding disposition and material limits in the existing task record.
+Keep the original requirement separate from agent-proposed policy; route unresolved product/ownership choices to Luis.
+Before the final verdict, cite the authority for each new owner, repair obligation and merge/deploy condition; an accepted follow-up alone establishes neither a release gate nor who owns the decision.
+The record and final verdict must agree on what was executed, what source established and what remains unknown.

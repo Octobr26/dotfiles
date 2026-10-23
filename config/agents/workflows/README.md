@@ -38,6 +38,7 @@ If a linked skill is unavailable, use the workflow's existing method and disclos
 | Interface, ownership, coupling, or architecture decision in scope | [codebase-design](../../skills/codebase-design/SKILL.md) |
 | User explicitly requests a continuation document | [handoff](../../skills/handoff/SKILL.md) |
 | Editing workflows, skills, or agent instructions | [instruction-writing.md](instruction-writing.md) |
+| Backend behavior in requests, services, queries, workers or migrations | [Backend behavior evidence](backend.md) |
 
 Handoff is a user-invoked option, not an automatic completion stage.
 Installation, attribution, and update ownership live in [the skill catalog](../../skills/README.md).
@@ -67,17 +68,45 @@ Installation, attribution, and update ownership live in [the skill catalog](../.
 
 Raise the review budget when a material assumption remains unresolved or verification fails.
 
+## Scope and authority
+
+Treat requests to check, verify, investigate, or review as read-only for the subject being checked unless Luis also authorizes its correction.
+Complete edits already authorized by the task, including necessary supporting changes, while reporting additional findings separately.
+For a conflict-resolution request, preserve the intended changes from the conflicting branches and make only the integration changes needed to resolve and verify them.
+An additional wording correction, cleanup, refactor, or behavior change requires authorization when it is outside that task, even if evidence shows it would be correct.
+
+Before applying an out-of-scope correction, present the exact proposed change, supporting evidence, and consequence for Luis to decide; continue the authorized work independently when possible.
+An update announcing the change or a separate commit does not supply authorization.
+Commit or push permission covers the authorized diff, not every finding discovered during verification.
+
 ## Clarification Gate
 
-Investigate local instructions, code, configuration, current state, and authoritative sources before asking Luis.
-Ask only when the missing answer can materially change acceptance criteria, user-visible behavior, scope, risk, authority, external effects, irreversibility, or cost, and no clearly superior safe reversible default exists.
+Resolve uncertainty before implementing behavior that depends on it.
+A material unknown is one whose answer can change acceptance, user-visible behavior, data meaning, scope, risk, authority, recovery, external effects, or cost.
 
-Treat an unresolved choice as material when it changes the user experience, interaction mode, permissions, side effects, or recovery path, even if the implementation itself is small. Ask before acting when plausible choices are not clearly interchangeable. Do not use live user state to discover requirements by iteration.
+- For factual unknowns, investigate local instructions, the owning code and actual callers, configuration, authoritative sources, and runtime evidence as needed.
+  Use a focused read-only investigative subagent when a separate evidence search or disputed interpretation would help; Luis authorizes this delegation within the current task.
+  Give it the exact question, relevant path, evidence needed, and a stop condition, using the task packet and `model-routing.md`.
+  Inspect its cited evidence; a subagent's conclusion alone does not settle the question.
+- For an unresolved product or policy choice, ask Luis with the concrete alternatives, recommended option, consequence, and exact decision needed.
+  Investigate facts that constrain the choice, but let Luis choose the intended behavior.
+- When evidence is unavailable or conflicting after a focused investigation, report what was checked and ask Luis for the missing information or decision.
+  Pause only the dependent work and continue independent work within scope.
 
-Otherwise choose in this order: correctness and safety, explicit acceptance criteria, established local pattern, smallest reversible scope, then speed and token cost.
-State the assumption and meaningful tradeoff briefly.
+An unknown is resolved by sufficient evidence or an explicit user decision, not by being labeled an assumption, copied into a prompt, or covered by a test.
+For routine implementation details whose alternatives preserve the established behavior, choose the smallest reversible option that fits local patterns.
 
-When a question is necessary, consolidate it and include the recommended default, its strongest benefit, its material tradeoff, and the exact missing decision.
+## Trace the affected behavior
+
+Before planning a behavior change, follow the full affected path from the real user action or entry point through actual callers, input and filter transformations, business rules, data access, serialization, and the rendered result or consuming system.
+Include relevant loading, error, empty-data, retry, cache, and state-transition paths; trace only paths the change can affect.
+When data is summarized or exported, compare its scope with the filters and series actually displayed.
+When rendering is gated, locate the component that owns user state and check what survives unmounting, refresh, or a filter change.
+
+The trace is complete when every consequential choice has a source or user decision, affected producers and consumers agree on the same discriminating examples, and the planned verification exercises the real caller or records the exact unavailable check.
+Resolve material gaps under the clarification gate before dependent implementation.
+
+For each applicable behavior slice, keep one compact evidence record using the existing [investigation handoff](research.md#investigation-completion-and-handoff); reuse the plan or task packet and mark inapplicable checks briefly. Select only the relevant [test and author checks](review.md#test-and-author-checks).
 
 ## Task Packet
 
@@ -116,6 +145,7 @@ Project-local model rules remain authoritative, including a project's active-mod
 | Condition | Required detail |
 | --- | --- |
 | Any implementation stage | Scope of editing and test decision: existing checks only, or already authorized test behaviors and edge cases; requested TDD and first focused behavior when applicable |
+| Implementation follows an investigation | Original request and [investigation handoff](research.md#investigation-completion-and-handoff), including sourced acceptance examples, inspected revisions, open findings, and readiness for the assigned slice |
 | Work crosses systems or consumers | Shared interface, owners, dependencies, independently deployed consumers, and compatibility checks |
 | External write or publication | Exact target/account/ref, existing authorization, relevant runbook, and required before/after verification |
 | Material terminology ambiguity | Established meaning, unresolved choice, and evidence or decision needed |
