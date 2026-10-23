@@ -377,7 +377,12 @@ link_workflow_agents() {
 link_workflow_skills() {
     local skill provider target source shared_skill
     local conflicts=0
-    local skills=(tdd diagnosing-bugs handoff domain-modeling codebase-design render-output)
+    local skills=(tdd diagnosing-bugs handoff domain-modeling codebase-design render-output gh-axi retro typesafe-ai jev-workflow
+        ask-matt code-review grill-with-docs implement-spec implement improve-codebase-architecture pr prototype
+        research setup-matt-pocock-skills to-spec to-tickets triage wayfinder wizard chief-of-staff claude-handoff
+        loop-me setup-ts-deep-modules writing-beats writing-fragments writing-shape git-guardrails-claude-code
+        migrate-to-shoehorn scaffold-exercises setup-pre-commit grill-me grilling teach to-questionnaire
+        wait-what writing-for-agents)
 
     for skill in "${skills[@]}"; do
         source="$DOTFILES_DIR/config/skills/$skill"
