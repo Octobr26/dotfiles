@@ -43,6 +43,7 @@
 8. Verifier runs focused existing checks or a direct inspection appropriate to the target.
    Before handoff, Implementer applies the author checks and reconciles [behavior evidence](review.md#behavior-evidence-before-a-verdict) with the final diff, resolving confirmed problems within the authorized scope.
    For behavior changes with a suitable test seam, inspect which plausible incorrect behavior the regression test rejects; copy and documentation changes use their own focused checks.
+   A refactor that rebuilds a definition another structure must match by position is not exempt as mechanical: add the order assertion described in [Test and author checks](review.md#test-and-author-checks) in the same change.
    Rerun affected checks after fixes and complete the project's required gates, recording actual results and remaining limits.
 9. Reviewer checks the final result against acceptance criteria, raw verification, and surrounding impact before seeing the Implementer's defense.
    Apply the finding gate and concise output rules in [review.md](review.md); omit optional preferences unless requested and preserve material unknowns.

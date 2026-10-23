@@ -90,6 +90,9 @@ For each added test, identify the distinct incorrect behavior it rejects; consol
 For changed test groups, trace the production import and each changing input through the actual function/query/service boundary to the distinguishing assertion. Name intentionally bypassed boundaries; parameterized labels or assertion-only inputs do not establish distinct behavior.
 Test and mutation-check results validate behavior against assertions, not the policy encoded in those assertions.
 Carry each relevant prior finding's source, original counterexample and disposition through the final-head check: fixed with evidence, refuted with evidence, or unresolved with its next check. Re-exercise the discriminating case or cite decisive source evidence at the final revision; a changed requirement needs its recorded authority.
+A test-gap finding that meets the bar above is refuted only by naming the existing assertion that fails on its counterexample; earlier manual comparison, low priority, or reluctance to repeat a list does not refute it.
+Keep it open with the smallest assertion that closes it, or record Luis's explicit deferral.
+When Luis asks which comments a reviewer would still leave, start from findings still open or deferred without that evidence and from PR-description claims without matching coverage, then use the reviewer's history.
 Derive the expected result from the requirement and producer contract before writing assertions; a test that preserves the reported failure does not close it.
 For affected time-series comparisons, cite the producer line that shows sparse versus zero-filled buckets and distinguish absent, null and measured zero. Anchor each series to its own request-range start; using the first returned point as the origin requires a cited zero-filling producer. Select discriminating leading/interior/trailing gaps, range-start versus first-event origins, request/browser/database zones, actual preset/hour boundaries and unequal calendar months only where relevant; apply shared-rule examples to affected consumers and record unavailable zone evidence.
 For metric comparisons, verify both sides use the same formula, provider population, denominator, inactivity/PTO rules, and units; unrelated field presence is not a compatibility signal.
@@ -103,14 +106,20 @@ For nested scrolling, enumerate elements with actual horizontal overflow and exe
 Choose follow-up checks to challenge an untested assumption; repeated green checks or reviewer counts do not expand coverage.
 For behavior changes with a suitable existing test seam, favor focused regression tests that fail on the old behavior and pass on the fix.
 Do not request fixtures, mocks, snapshots, or verification helpers merely to mirror implementation; follow existing authorization rules before adding them.
+A one-time comparison during a refactor does not protect later edits.
+When a refactor builds an ordered definition from shared parts (spreads, shared lists, generated config) and a separately defined structure must stay aligned with it by position, such as grid track widths joined in order against column definitions kept elsewhere, an inline assertion of each variant's ids in order is behavior coverage, not a snapshot or mirror.
+When one entry supplies everything rendered for its column (header, cell and width), reordering moves them together; it needs no order assertion unless the order itself is a stated requirement.
 Copy, documentation, and mechanical changes use focused checks appropriate to their actual risk.
 
 Before applying a cleanup or fix to a PR, read its existing review comments and replies; do not undo a change a reviewer requested.
 Before handing back an authorized implementation, inspect the final diff for the same reachable failures and affected consumers.
-Check action followed by refresh/re-entry, loading/error/missing-data states, identity, and recovery where relevant.
+Check action followed by refresh/re-entry and by its reverse action (hide then show, save then clear), loading/error/missing-data states, identity, and recovery where relevant; reading a pre-seeded stored value does not exercise the write path.
 Keep code comments brief and explain only non-obvious constraints; apply the project's comment rules.
 Fix confirmed problems within the authorized scope at the layer that owns them, then rerun affected checks and complete required gates.
 Inspect existing validation output and its revision/scope before installing, building or creating a new check. Record actual commands/results separately for tests, backend/contract inspection, UI exercise and unavailable checks; include target/revision/state, skips, baseline failures and evidence paths. Source inspection, synthetic UI, authenticated page exercise and deployment evidence support different claims; an approved exception does not make an unrun check pass.
+In a PR description, tie each test-plan step and checked verification box to the test or recorded observation that exercised it at the final head.
+A step that describes a round trip (hide then restore, save then reload) needs evidence for each direction; a test that only reads a pre-seeded value covers neither the action nor its reversal.
+Label steps nobody ran as manual checks for reviewers, and leave boxes for unrun checks unchecked.
 Use the current project's scripts and CI requirements rather than copying a command list from another repository.
 
 For stacked PRs, record the current remote heads and base revisions before rebasing, then record the resulting local heads.
