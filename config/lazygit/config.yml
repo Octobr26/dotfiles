@@ -2,7 +2,8 @@ customCommands:
   - key: "P"
     context: "worktrees"
     description: "Switch preview to selected worktree"
-    command: "worktree-preview use {{.SelectedWorktree.Branch | quote}}"
+    command: "worktree-preview use {{.SelectedWorktree.Path | quote}}"
+
     loadingText: "Switching frontend preview"
     output: "terminal"
   - key: "X"
