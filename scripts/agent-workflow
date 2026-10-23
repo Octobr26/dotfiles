@@ -1,0 +1,631 @@
+#!/usr/bin/env python3
+"""Keep a private, passive Codex/Claude usage history and reconcile local Git facts."""
+
+import argparse
+from collections import Counter
+import datetime as dt
+import fcntl
+import hashlib
+import json
+import os
+from pathlib import Path
+import plistlib
+import runpy
+import shutil
+import sqlite3
+import subprocess
+import sys
+from zoneinfo import ZoneInfo
+
+ROOT = Path(__file__).resolve().parent.parent
+STATE = Path.home() / '.local/state/agent-workflow'
+CONFIG = Path.home() / '.config/agent-workflow/config.json'
+LABEL = 'com.luis.agent-workflow'
+USAGE = runpy.run_path(str(ROOT / 'scripts/skill-usage'))
+METRICS = ROOT / 'config/agents/scripts/workflow-metrics.mjs'
+PRICING = runpy.run_path(str(ROOT / 'config/agents/scripts/workflow-pricing.py'))
+JEV = runpy.run_path(str(ROOT / 'config/agents/scripts/workflow-jev.py'))
+TURN_FIELDS = ('taskKey', 'sessionId', 'turnId', 'provider', 'startedAtMs',
+               'completedAtMs', 'durationMs', 'timeToFirstTokenMs', 'complete',
+               'model', 'delegatedModels', 'reasoningEffort', 'inputTokens',
+               'cachedInputTokens', 'outputTokens', 'reasoningOutputTokens',
+               'totalTokens', 'usageEvents', 'toolCalls', 'toolFailures', 'usageStatus')
+INTERVAL_SECONDS = 300
+COUNTER_FIELDS = ('inputTokens', 'cachedInputTokens', 'outputTokens',
+                  'reasoningOutputTokens', 'usageEvents', 'toolCalls', 'toolFailures')
+
+
+def private_directory(path):
+    path.mkdir(parents=True, exist_ok=True, mode=0o700)
+    path.chmod(0o700)
+
+
+def write_private(path, text):
+    private_directory(path.parent)
+    temp = path.with_suffix(path.suffix + '.tmp')
+    temp.write_text(text)
+    temp.chmod(0o600)
+    temp.replace(path)
+
+
+def settings():
+    if not CONFIG.exists():
+        raise ValueError('Run agent-workflow prepare first.')
+    return json.loads(CONFIG.read_text())
+
+
+def connect():
+    private_directory(STATE)
+    db = sqlite3.connect(STATE / 'history.sqlite')
+    db.execute('PRAGMA journal_mode=WAL')
+    db.executescript('''
+      CREATE TABLE IF NOT EXISTS turns (
+        provider TEXT, turn_key TEXT, session_id TEXT, started REAL, data TEXT,
+        PRIMARY KEY(provider, turn_key));
+      CREATE TABLE IF NOT EXISTS sources (
+        path TEXT PRIMARY KEY, signature TEXT, data TEXT);
+      CREATE TABLE IF NOT EXISTS skills (
+        provider TEXT, event_id TEXT, skill TEXT, kind TEXT, session_id TEXT,
+        timestamp REAL, PRIMARY KEY(provider, event_id, skill, kind));
+      CREATE TABLE IF NOT EXISTS commits (
+        repo TEXT, sha TEXT, timestamp REAL, PRIMARY KEY(repo, sha));
+      CREATE TABLE IF NOT EXISTS requests (
+        provider TEXT, event_id TEXT, session_id TEXT, timestamp REAL, data TEXT,
+        PRIMARY KEY(provider, event_id));
+      CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT);
+      CREATE TABLE IF NOT EXISTS interactions (
+        event_id TEXT PRIMARY KEY, timestamp REAL, version TEXT, data TEXT);
+    ''')
+    (STATE / 'history.sqlite').chmod(0o600)
+    return db
+
+
+def within(path, workspace):
+    try:
+        Path(path).resolve().relative_to(workspace)
+        return True
+    except (ValueError, TypeError):
+        return False
+
+
+def merge_turn(previous, current):
+    """Retain observed usage when an expired child transcript reduces coverage."""
+    if not previous:
+        return current
+    reduced = any((current.get(key) or 0) < (previous.get(key) or 0) for key in COUNTER_FIELDS)
+    result = dict(current)
+    for key in COUNTER_FIELDS:
+        result[key] = max(current.get(key) or 0, previous.get(key) or 0)
+    result['totalTokens'] = result['inputTokens'] + result['outputTokens']
+    result['delegatedModels'] = sorted(set(current.get('delegatedModels') or []) | set(previous.get('delegatedModels') or []))
+    for key in ('model', 'reasoningEffort', 'durationMs', 'timeToFirstTokenMs', 'completedAtMs'):
+        if result.get(key) is None:
+            result[key] = previous.get(key)
+    result['complete'] = bool(current.get('complete') or previous.get('complete'))
+    result['usageStatus'] = 'observed' if result['usageEvents'] else 'unavailable'
+    result['usage_preservation'] = 'high-water' if reduced or previous.get('usage_preservation') == 'high-water' else 'current-snapshot'
+    return result
+
+
+def source_features(db, config, admitted_sessions):
+    """Persist an allowlist of metadata and skill calls; discard all message text."""
+    names = {item['name'] for item in json.loads(USAGE['MANIFEST'].read_text())}
+    counts = Counter()
+    workspace = Path(config['workspace']).resolve()
+    bases = [('claude', Path.home() / '.claude/projects'),
+             ('codex', Path.home() / '.codex/sessions'),
+             ('codex', Path.home() / '.codex/archived_sessions')]
+    for provider, base in bases:
+        for path in base.rglob('*.jsonl'):
+            try:
+                stat = path.stat()
+                signature = f'4:{stat.st_mtime_ns}:{stat.st_size}'
+                source_id = hashlib.sha256(str(path).encode()).hexdigest()
+                previous = db.execute('SELECT signature FROM sources WHERE path=?', (source_id,)).fetchone()
+                if previous and previous[0] == signature:
+                    continue
+                session_id = None
+                cwd = None
+                branch = None
+                reported_cost = None
+                events = []
+                malformed = 0
+                with path.open(errors='replace') as stream:
+                    for index, line in enumerate(stream):
+                        try:
+                            row = json.loads(line)
+                        except ValueError:
+                            malformed += 1
+                            continue
+                        if not isinstance(row, dict):
+                            malformed += 1
+                            continue
+                        payload = row.get('payload') or {}
+                        if not isinstance(payload, dict):
+                            payload = {}
+                        if provider == 'claude':
+                            session_id = row.get('sessionId') or session_id
+                            cwd = row.get('cwd') or cwd
+                            branch = row.get('gitBranch') or branch
+                            if row.get('type') == 'cost-state':
+                                value = row.get('totalCostUSD')
+                                if isinstance(value, (int, float)) and value >= 0:
+                                    reported_cost = value
+                        elif row.get('type') == 'session_meta':
+                            session_id = payload.get('id') or session_id
+                            cwd = payload.get('cwd') or cwd
+                            branch = (payload.get('git') or {}).get('branch') or branch
+                        timestamp = USAGE['timestamp'](row.get('timestamp'))
+                        for call_id, tool, value in USAGE['calls'](row, provider):
+                            for skill, kind in USAGE['classify'](tool, value, names).items():
+                                event_id = call_id or hashlib.sha256(f'{path}:{index}'.encode()).hexdigest()
+                                events.append((provider, event_id, skill, kind, timestamp))
+                admitted = ((provider, session_id) in admitted_sessions or within(cwd, workspace))
+                data = {'admitted': False}
+                if admitted:
+                    data = {'provider': provider, 'session_id': session_id,
+                            'cwd': cwd if within(cwd, workspace) else None,
+                            'branch': branch if within(cwd, workspace) else None,
+                            'reported_cost_usd': reported_cost,
+                            'malformed_lines': malformed, 'admitted': True,
+                            'subagent': 'subagents' in path.parts}
+                db.execute('INSERT OR REPLACE INTO sources VALUES (?,?,?)',
+                           (source_id, signature, json.dumps(data)))
+                if admitted and session_id:
+                    for event in events:
+                        p, event_id, skill, kind, timestamp = event
+                        db.execute('INSERT OR REPLACE INTO skills VALUES (?,?,?,?,?,?)',
+                                   (p, event_id, skill, kind, session_id, timestamp))
+                for request in PRICING['requests'](path, provider, workspace, within, USAGE['timestamp']):
+                    prior = db.execute('SELECT data FROM requests WHERE provider=? AND event_id=?',
+                                       (provider, request['event_id'])).fetchone()
+                    if prior:
+                        old = json.loads(prior[0])
+                        if 'tokens' in old and 'tokens' in request:
+                            request['tokens'] = {k: max(v, old['tokens'].get(k, 0)) for k, v in request['tokens'].items()}
+                            request['timestamp'] = min(request['timestamp'], old['timestamp'])
+                        elif 'tokens' in old:
+                            request = old
+                    db.execute('INSERT OR REPLACE INTO requests VALUES (?,?,?,?,?)',
+                               (provider, request['event_id'], request['session_id'], request['timestamp'], json.dumps(request)))
+                    counts['request_observations'] += 1
+                counts['parsed_files'] += 1
+                counts['malformed_lines'] += malformed
+            except FileNotFoundError:
+                counts['disappeared_files'] += 1
+    return dict(counts)
+
+
+def git_facts(db, config):
+    workspace = Path(config['workspace'])
+    repos = []
+    excluded = {'.git', 'node_modules', '.venv', 'vendor', 'dist', 'build'}
+    for directory, dirs, files in os.walk(workspace):
+        if '.git' in dirs or '.git' in files:
+            repos.append(Path(directory))
+            dirs[:] = []
+        else:
+            dirs[:] = [name for name in dirs if name not in excluded]
+    errors = 0
+    for repo in repos:
+        try:
+            result = subprocess.run(['git', '-C', str(repo), 'log', '--all',
+                                     f'--since={config["backfill_days"]} days ago',
+                                     '--format=%H %ct'], capture_output=True, text=True,
+                                    check=True, timeout=15)
+            for line in result.stdout.splitlines():
+                sha, timestamp = line.split()
+                db.execute('INSERT OR IGNORE INTO commits VALUES (?,?,?)',
+                           (str(repo), sha, float(timestamp)))
+        except (subprocess.SubprocessError, ValueError):
+            errors += 1
+    return {'repositories': len(repos), 'git_scan_errors': errors}
+
+
+def collect():
+    config = settings()
+    private_directory(STATE)
+    with (STATE / 'collector.lock').open('a') as lock:
+        try:
+            fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError:
+            print('A collection is already running.')
+            return
+        with connect() as db:
+            # Replace the initial pilot's unhashed source cache; telemetry remains.
+            db.execute('DELETE FROM sources WHERE length(path) != 64')
+            directories = [Path.home() / '.codex/sessions', Path.home() / '.codex/archived_sessions']
+            admitted = set()
+            for index, directory in enumerate(directories):
+                if index and not directory.exists():
+                    continue
+                command = [config['node'], str(METRICS), 'summary', '--root', config['workspace'],
+                           '--days', str(config['backfill_days']), '--sessions', str(directory),
+                           '--format', 'json', '--table-limit', '0']
+                if index:
+                    command += ['--claude-sessions', str(STATE / 'no-claude-duplicate-scan')]
+                result = subprocess.run(command, capture_output=True, text=True, timeout=180)
+                if result.returncode:
+                    raise ValueError(f'Provider collection failed (exit {result.returncode}); retry with agent-workflow collect.')
+                snapshot = json.loads(result.stdout)
+                for source in snapshot['tasks']:
+                    turn = {key: source.get(key) for key in TURN_FIELDS}
+                    admitted.add((turn['provider'], turn['sessionId']))
+                    previous = db.execute('SELECT data FROM turns WHERE provider=? AND turn_key=?',
+                                          (turn['provider'], turn['taskKey'])).fetchone()
+                    turn = merge_turn(json.loads(previous[0]) if previous else None, turn)
+                    db.execute('INSERT OR REPLACE INTO turns VALUES (?,?,?,?,?)',
+                               (turn['provider'], turn['taskKey'], turn['sessionId'],
+                                turn['startedAtMs'], json.dumps(turn)))
+            capture = source_features(db, config, admitted)
+            capture.update(git_facts(db, config))
+            capture['last_success'] = dt.datetime.now(dt.timezone.utc).isoformat()
+            db.execute('INSERT OR REPLACE INTO meta VALUES (?,?)', ('collection', json.dumps(capture)))
+        if config.get('jev', {}).get('enabled'):
+            capture['jev'] = enrich(config)
+        report(days=7, save=True)
+        print(json.dumps(capture))
+
+
+def enrich(config, limit=None):
+    options = config.get('jev', {})
+    if not options.get('enabled'):
+        return {'status': 'disabled'}
+    private_directory(STATE)
+    with (STATE / 'jev.lock').open('a') as lock:
+        try:
+            fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError:
+            return {'status': 'already-running'}
+        now = dt.datetime.now(dt.timezone.utc)
+        midnight = now.replace(hour=0, minute=0, second=0, microsecond=0).timestamp()
+        with connect() as db:
+            known = {row[0] for row in db.execute('SELECT event_id FROM interactions WHERE version=?', (JEV['VERSION'],))}
+            daily = db.execute('SELECT COUNT(*) FROM interactions WHERE json_extract(data,"$.labeled_at")>=?',
+                               (dt.datetime.fromtimestamp(midnight, dt.timezone.utc).isoformat(),)).fetchone()[0]
+            attempt = db.execute('SELECT value FROM meta WHERE key="jev-enrichment"').fetchone()
+        prior = json.loads(attempt[0]) if attempt else {}
+        if prior.get('status') == 'failed' and now.timestamp() - prior.get('attempted_at', 0) < 1800:
+            return {**prior, 'status': 'retry-cooldown'}
+        available = max(0, options.get('max_events_per_day', 80) - daily)
+        calls_available = JEV['enrichment_calls_remaining'](options, JEV['call_history'](midnight))
+        count = min(limit or options.get('max_events_per_collection', 8), available)
+        result = {'status': 'idle', 'attempted_at': now.timestamp(), 'labeled': 0}
+        if count and calls_available:
+            since = USAGE['timestamp'](options['start_at'])
+            if since is None:
+                raise ValueError('Invalid Jev start_at configuration.')
+            events, pending = JEV['pending_events'](config['workspace'], since, known, count)
+            result['pending'] = pending
+            if events:
+                state, questions = JEV['interaction_request'](events)
+                try:
+                    response = JEV['evaluate'](state, questions, 'followup-classification', model=options['model'])
+                    rows = JEV['interaction_rows'](events, response)
+                    with connect() as db:
+                        for row in rows:
+                            db.execute('INSERT OR REPLACE INTO interactions VALUES (?,?,?,?)',
+                                       (row['event_id'], row['timestamp'], row['version'], json.dumps(row)))
+                    result.update(status='success', labeled=len(rows), pending=pending - len(rows),
+                                  call_id=response['call_id'])
+                except (ValueError, OSError) as error:
+                    result.update(status='failed', error=str(error))
+        else:
+            result['status'] = 'daily-budget-reached'
+        with connect() as db:
+            db.execute('INSERT OR REPLACE INTO meta VALUES (?,?)', ('jev-enrichment', json.dumps(result)))
+        if result['status'] not in ('failed', 'daily-budget-reached'):
+            result['triage'] = review_week(config)
+        return result
+
+
+def review_week(config):
+    clock = dt.datetime.now(dt.timezone.utc)
+    now = clock.timestamp()
+    with connect() as db:
+        prior = db.execute('SELECT value FROM meta WHERE key="jev-triage"').fetchone()
+        labels = [json.loads(row[0]) for row in db.execute('SELECT data FROM interactions WHERE timestamp>=?', (now - 7 * 86400,))]
+    prior = json.loads(prior[0]) if prior else {}
+    interval = 1800 if prior.get('status') == 'failed' else 86400
+    if prior.get('status') in ('success', 'failed') and now - prior.get('attempted_at', 0) < interval:
+        return 'cached'
+    midnight = clock.replace(hour=0, minute=0, second=0, microsecond=0).timestamp()
+    if not JEV['enrichment_calls_remaining'](config['jev'], JEV['call_history'](midnight)):
+        return 'daily-budget-reached'
+    state, questions = JEV['triage_request'](labels)
+    result = {'attempted_at': now, 'window_days': 7, 'labeled_followups': len(labels),
+              'candidates': state['candidates'], 'source': 'jev-inferred', 'version': JEV['VERSION']}
+    if not state['candidates']:
+        result['status'] = 'insufficient-evidence'
+    else:
+        try:
+            response = JEV['evaluate'](state, questions, 'weekly-triage', model=config['jev']['model'])
+            answer = response['answers']['experiment']
+            result.update(status='success', call_id=response['call_id'], judgment=answer,
+                          selected=JEV['resolved_choice'](answer, fallback='gather-data'))
+        except (ValueError, OSError) as error:
+            result.update(status='failed', error=str(error))
+    with connect() as db:
+        db.execute('INSERT OR REPLACE INTO meta VALUES (?,?)', ('jev-triage', json.dumps(result)))
+    return result['status']
+
+
+def jev_report(db, config, cutoff):
+    labels = [json.loads(row[0]) for row in db.execute('SELECT data FROM interactions WHERE timestamp>=?', (cutoff,))]
+    calls = JEV['call_history'](cutoff)
+    successes = [row for row in calls if row.get('status') == 'success']
+    lines = ['## Jev enrichment and call overhead', '',
+             f'Automatic enrichment: {"enabled" if config.get("jev", {}).get("enabled") else "disabled"}. '
+             f'{len(labels)} follow-ups labeled; {sum(row["kind"] == "unknown" for row in labels)} uncertain.',
+             'Labels are inferred from bounded conversation excerpts, not human-confirmed outcomes. '
+             'Native telemetry remains the source for usage and timing.', '',
+             '| Work category | Labeled follow-ups | Corrections | Clarifications | Uncertain |',
+             '| --- | ---: | ---: | ---: | ---: |']
+    for category in sorted({row['category'] for row in labels}):
+        rows = [row for row in labels if row['category'] == category]
+        counts = Counter(row['kind'] for row in rows)
+        lines.append(f'| {category} | {len(rows)} | {counts["correction"]} | {counts["clarification"]} | {counts["unknown"]} |')
+    rechecks = {}
+    path = STATE / 'jev-rechecks.jsonl'
+    if path.exists():
+        rechecks = {row['event_id']: row for row in JEV['records'](path)
+                    if isinstance(row, dict) and row.get('version') == 'followup-recheck-v1'}
+    reassessed = [rechecks[row['event_id']] for row in labels if row['event_id'] in rechecks]
+    if reassessed:
+        lines += ['', '### Second pass on uncertain follow-ups', '',
+                  f'{len(reassessed)} follow-ups rechecked; {sum(bool(row["uncertain_fields"]) for row in reassessed)} '
+                  'still need review in at least one relevant field.',
+                  'Best-fit predictions are shown with uncertainty flags. Automatic friction metrics use confidence-gated labels.', '',
+                  '| Predicted follow-up type | Rechecked | Type below 0.8 confidence |',
+                  '| --- | ---: | ---: |']
+        for kind in sorted({row['predictions']['kind'] for row in reassessed}):
+            group = [row for row in reassessed if row['predictions']['kind'] == kind]
+            lines.append(f'| {kind} | {len(group)} | {sum("kind" in row["uncertain_fields"] for row in group)} |')
+        lines += ['', '| Predicted work category | Rechecked | Category below 0.8 confidence |',
+                  '| --- | ---: | ---: |']
+        for category in sorted({row['predictions']['category'] for row in reassessed}):
+            group = [row for row in reassessed if row['predictions']['category'] == category]
+            lines.append(f'| {category} | {len(group)} | {sum("category" in row["uncertain_fields"] for row in group)} |')
+    lines += ['', f'Jev call attempts: {len(calls)}; successful: {len(successes)}; failed: {len(calls) - len(successes)}. '
+              f'Recorded overhead: {sum(row.get("latency_ms", 0) for row in calls)} ms. '
+              f'Input/output tokens: {sum(row.get("usage", {}).get("input_tokens", 0) for row in calls):,}/'
+              f'{sum(row.get("usage", {}).get("output_tokens", 0) for row in calls):,}.',
+              'Failed calls may have unreported provider usage. Jev cost is unknown; its tokens are separate from the API-equivalent subtotal.',
+              'Acceptance mentions do not confirm task completion. Active human minutes, accepted delivery, rework and defects remain unknown.']
+    uses = {}
+    path = STATE / 'jev-use.jsonl'
+    if path.exists():
+        for row in JEV['records'](path):
+            if isinstance(row, dict) and row.get('status') in ('applied', 'overridden'):
+                uses[row.get('call_id')] = row['status']
+    decisions = set()
+    path = STATE / 'decisions.jsonl'
+    if path.exists():
+        decisions = {row.get('call_id') for row in JEV['records'](path) if isinstance(row, dict)}
+    routes = [row for row in successes if row.get('purpose') in ('skill-route', 'skill-recheck')
+              and row['call_id'] in decisions]
+    dispositions = Counter(uses.get(row['call_id'], 'unknown') for row in routes)
+    lines += [f'Routed requests with shared telemetry: {len(routes)}; agent-reported applied: {dispositions["applied"]}; '
+              f'overridden: {dispositions["overridden"]}; disposition unknown: {dispositions["unknown"]}.',
+              'Route use is an agent declaration, not proof of benefit. Older route receipts lack shared call telemetry.']
+    last = db.execute('SELECT value FROM meta WHERE key="jev-enrichment"').fetchone()
+    if last:
+        status = json.loads(last[0])
+        lines += [f'Latest enrichment status: {status["status"]}; pending follow-ups at last scan: {status.get("pending", "unknown")}. '
+                  f'Daily classification cap: {config.get("jev", {}).get("max_events_per_day", "unknown")}.']
+    lines += [f'Daily automatic call cap (including failures and triage): {config.get("jev", {}).get("max_calls_per_day", 12)}; resets at UTC midnight.']
+    triage = db.execute('SELECT value FROM meta WHERE key="jev-triage"').fetchone()
+    lines += ['', '### Weekly improvement experiment', '']
+    if triage:
+        result = json.loads(triage[0])
+        generated = dt.datetime.fromtimestamp(result['attempted_at'], dt.timezone.utc).isoformat()
+        lines.append(f'Generated: {generated}; rolling 7-day sample: {result["labeled_followups"]} labeled follow-ups.')
+        selected = result.get('selected')
+        if result['status'] == 'success' and selected in result['candidates']:
+            candidate = result['candidates'][selected]
+            lines += [f'Suggested experiment: {candidate["experiment"]}',
+                      f'Evidence: {candidate["observed_followups"]} inferred friction follow-ups across {candidate["sessions"]} sessions.',
+                      f'Measure: {candidate["metric"]}',
+                      'Keep the change only if comparable work needs fewer corrections or clarifications without worse verification.',
+                      'Evidence turn IDs: ' + ', '.join(candidate['evidence_ids'])]
+        else:
+            lines.append('Gather more evidence before selecting a workflow change. Triage status: ' + result['status'] + '.')
+    else:
+        lines.append('Gather more labeled follow-ups before selecting a workflow experiment.')
+    return lines + ['', 'Suggestions do not change workflow configuration. Classifier confidence is not evidence of effectiveness.', '']
+
+
+def report(days=7, save=False):
+    config = settings()
+    cutoff = (dt.datetime.now(dt.timezone.utc).timestamp() - days * 86400)
+    with connect() as db:
+        turns = [json.loads(row[0]) for row in db.execute('SELECT data FROM turns WHERE started>=?', (cutoff * 1000,))]
+        sources = [json.loads(row[0]) for row in db.execute('SELECT data FROM sources')]
+        requests = [json.loads(row[0]) for row in db.execute('SELECT data FROM requests WHERE timestamp>=?', (cutoff,))]
+        skills = list(db.execute('SELECT skill,kind,COUNT(*) FROM skills WHERE timestamp>=? GROUP BY skill,kind ORDER BY COUNT(*) DESC', (cutoff,)))
+        commits = list(db.execute('SELECT repo,COUNT(*) FROM commits WHERE timestamp>=? GROUP BY repo', (cutoff,)))
+        last = db.execute('SELECT value FROM meta WHERE key="collection"').fetchone()
+        enrichment_lines = jev_report(db, config, cutoff)
+    last = json.loads(last[0]) if last else {}
+    lines = [f'# Agent workflow: last {days} days', '', f'Generated: {dt.datetime.now(dt.timezone.utc).isoformat()}',
+             f'Workspace: {config["workspace"]}', f'Last successful capture: {last.get("last_success", "not collected")}', '',
+             '## Captured activity', '', '| Provider | Sessions | Turns | Usage known | Input incl. cache | Cached input | Output | Observed turn minutes |',
+             '| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |']
+    for provider in ('codex', 'claude'):
+        rows = [row for row in turns if row['provider'] == provider]
+        observed = [row for row in rows if row.get('usageEvents', 0) > 0]
+        durations = [row['durationMs'] for row in rows if row.get('durationMs') is not None]
+        lines.append(f'| {provider} | {len({r["sessionId"] for r in rows})} | {len(rows)} | {len(observed)}/{len(rows)} | '
+                     f'{sum(r.get("inputTokens", 0) for r in observed):,} | {sum(r.get("cachedInputTokens", 0) for r in observed):,} | '
+                     f'{sum(r.get("outputTokens", 0) for r in observed):,} | {sum(durations)/60000:.1f} ({len(durations)} timed) |')
+    lines += ['', 'Turn minutes include agent/tool work and can overlap; they are not human active time, pure inference waiting, or accepted delivery time.',
+              'Input includes cache reads and Claude cache writes. Reasoning tokens are part of output; they are not added again.', '',
+              '## Models and effort (observed, not routed)', '', '| Provider | Model | Effort | Turns |', '| --- | --- | --- | ---: |']
+    for (provider, model, effort), count in Counter((r['provider'], r.get('model') or 'unknown', r.get('reasoningEffort') or 'unknown') for r in turns).most_common():
+        lines.append(f'| {provider} | {model} | {effort} | {count} |')
+    lines += ['', '## Skill evidence', '', '| Skill | Evidence | Calls |', '| --- | --- | ---: |']
+    for skill, kind, count in skills:
+        lines.append(f'| {skill} | {kind} | {count} |')
+    lines += ['', 'Invocations and reads show loading evidence; shell path references are weaker. Neither proves successful application.', '',
+              '## Git activity (independent facts)', '', '| Repository | Commits observed |', '| --- | ---: |']
+    for repo, count in commits:
+        lines.append(f'| {Path(repo).relative_to(Path(config["workspace"]))} | {count} |')
+    session_ids = {(r['provider'], r['sessionId']) for r in turns}
+    active_sources = [s for s in sources if s.get('admitted') and (s['provider'], s['session_id']) in session_ids and not s['subagent']]
+    costs = {}
+    for source in active_sources:
+        if source.get('reported_cost_usd') is not None:
+            costs[(source['provider'], source['session_id'])] = source['reported_cost_usd']
+    lines += ['', '## API-equivalent token usage cost', '',
+              f'Current reference rates verified {PRICING["RATES"]["verified_at"]}; applied to historical usage for comparison, not historical billing.', '',
+              '| Provider | Request model | Priced / observed requests | Token estimate USD |',
+              '| --- | --- | ---: | ---: |']
+    priced = [(r, PRICING['estimate'](r)) for r in requests]
+    groups = sorted({(r['provider'], r.get('model') or 'unknown') for r in requests})
+    for provider, model in groups:
+        rows = [price for r, price in priced if r['provider'] == provider and (r.get('model') or 'unknown') == model]
+        known = [price for price in rows if price['status'] == 'priced']
+        amount = f'${sum(p["usd"] for p in known):.4f}' if known else 'unknown'
+        lines.append(f'| {provider} | {model} | {len(known)}/{len(rows)} | {amount} |')
+    reasons = Counter(price['reason'] for _, price in priced if price['status'] != 'priced')
+    lines += ['', f'Priced request subtotal: ${sum(p.get("usd", 0) for _, p in priced):.4f}. Unpriced reasons: {dict(reasons)}.',
+              'Only retained native Codex response records and Claude message usage are priced. Legacy Codex counters, missing requests, unknown models/modifiers and unavailable cache-write TTL remain outside the subtotal.',
+              'Codex uses standard/global reference rates because served tier/geography are absent. Claude uses observed speed and geography when available; missing geography uses a global-rate assumption.',
+              'Request timestamps define the window. Streaming copies are deduplicated; cache writes and reasoning are not charged twice. Hosted tool charges and subscription fees are excluded.',
+              'Turn totals above include delegated and preserved usage; request pricing has separate coverage and may not match those totals.', '',
+              '## Native estimates and unresolved outcomes', '',
+              f'Native session cost estimates observed: {len(costs)} sessions. Whole-session sum: ${sum(costs.values()):.4f}.',
+              'These estimates may include work outside the reporting window or workspace. They are not subscription charges and are not added to the request subtotal.',
+              f'Tool failure signals: {sum(r.get("toolFailures", 0) for r in turns)}. A nonzero exit may be an expected search result rather than a defect.',
+              'Acceptance, human active minutes, rework time and PR/CI outcomes are not automatically established by this recorder.',
+              'Commits are historical observations; rebases can leave observed commits that are no longer reachable. They are not task completion.',
+              'A cleared conversation remains in captured history. Fresh sessions are separate; same branch does not prove same task.', '',
+              '## Recommendations versus use', '',
+              'Jev recommendations, agent-declared use, inferred labels and call overhead are recorded separately from native usage.',
+              'Review this report with an agent to reconcile related work using ticket/PR/commit evidence and identify one improvement.',
+              'Claude /insights supplies native friction analysis. Do not infer satisfaction from silence.', '',
+              f'Usage retained at a high-water mark after reduced source coverage: {sum(r.get("usage_preservation") == "high-water" for r in turns)} turns. Parser corrections need explicit reconciliation.',
+              f'Capture coverage: {last.get("malformed_lines", 0)} malformed lines on last changed-file scan; {last.get("git_scan_errors", 0)} Git scan errors.',
+              'Polling is every five minutes while logged in and awake. Files removed before capture, unsupported telemetry and unflushed turns can be missed.', '']
+    lines += enrichment_lines
+    session_rows = {}
+    for turn in turns:
+        session_rows.setdefault((turn['provider'], turn['sessionId']), []).append(turn)
+    contexts = {}
+    for source in active_sources:
+        contexts[(source['provider'], source['session_id'])] = source
+    candidates = sorted(session_rows.items(), key=lambda item: sum(r.get('durationMs') or 0 for r in item[1]), reverse=True)[:20]
+    lines += ['## Daily reconciliation candidates', '',
+              'Start with the longest observed sessions. Use ticket/PR/commit evidence to decide whether separate conversations belong to one task.',
+              'Repository/branch context is a clue, not a task identity; a topic switch can happen on the same branch.', '',
+              '| Provider | Session | Latest workspace context | Turns | Turn minutes | Tool failures |',
+              '| --- | --- | --- | ---: | ---: | ---: |']
+    for (provider, session_id), rows in candidates:
+        context = contexts.get((provider, session_id), {})
+        cwd = context.get('cwd')
+        project = str(Path(cwd).relative_to(Path(config['workspace']))) if cwd else 'unknown'
+        branch = (context.get('branch') or 'unknown').replace('|', '\\|')
+        lines.append(f'| {provider} | {session_id} | {project} / {branch} | {len(rows)} | '
+                     f'{sum(r.get("durationMs") or 0 for r in rows)/60000:.1f} | {sum(r.get("toolFailures") or 0 for r in rows)} |')
+    lines.append('')
+    result = '\n'.join(lines)
+    if save:
+        day = dt.datetime.now(ZoneInfo(config['timezone'])).strftime('%Y-%m-%d')
+        write_private(STATE / 'reports/latest.md', result)
+        write_private(STATE / f'reports/{day}.md', result)
+    else:
+        print(result)
+
+
+def prepare(workspace):
+    node = shutil.which('node')
+    if not node:
+        raise ValueError('Node.js is required by the existing transcript parser.')
+    workspace = workspace.expanduser().resolve()
+    if not workspace.is_dir():
+        raise ValueError('Workspace does not exist.')
+    config = {'workspace': str(workspace), 'node': node, 'backfill_days': 30,
+              'timezone': 'America/Los_Angeles'}
+    if CONFIG.exists():
+        previous = settings()
+        if previous.get('workspace') == str(workspace) and 'jev' in previous:
+            config['jev'] = previous['jev']
+    write_private(CONFIG, json.dumps(config, indent=2) + '\n')
+    private_directory(STATE)
+    launch = Path.home() / f'Library/LaunchAgents/{LABEL}.plist'
+    data = {'Label': LABEL, 'ProgramArguments': [sys.executable, str(Path(__file__).resolve()), 'collect'],
+            'RunAtLoad': True, 'StartInterval': INTERVAL_SECONDS,
+            'WorkingDirectory': str(ROOT),
+            'StandardOutPath': str(STATE / 'collector.log'),
+            'StandardErrorPath': str(STATE / 'collector-error.log')}
+    private_directory(launch.parent)
+    write_private(launch, plistlib.dumps(data).decode())
+    print(f'Prepared {launch}; activate with launchctl bootstrap gui/{os.getuid()} {launch}')
+
+
+def status():
+    config = settings()
+    with connect() as db:
+        last = db.execute('SELECT value FROM meta WHERE key="collection"').fetchone()
+        counts = dict(db.execute('SELECT provider,COUNT(*) FROM turns GROUP BY provider'))
+        labels = db.execute('SELECT COUNT(*) FROM interactions').fetchone()[0]
+    service = subprocess.run(['launchctl', 'print', f'gui/{os.getuid()}/{LABEL}'], capture_output=True, text=True)
+    print(json.dumps({'service_loaded': service.returncode == 0, 'workspace': config['workspace'],
+                      'captured_turns': counts, 'collection': json.loads(last[0]) if last else None,
+                      'jev_enabled': config.get('jev', {}).get('enabled', False), 'labeled_followups': labels,
+                      'report': str(STATE / 'reports/latest.md'),
+                      'database': str(STATE / 'history.sqlite')}, indent=2))
+
+
+def main():
+    os.umask(0o077)
+    parser = argparse.ArgumentParser(description=__doc__)
+    commands = parser.add_subparsers(dest='command', required=True)
+    setup = commands.add_parser('prepare', help='Prepare private config and a macOS LaunchAgent.')
+    setup.add_argument('--workspace', type=Path, default=Path.home() / 'dev/gitkraken')
+    commands.add_parser('collect', help='Capture local metadata; run bounded TypeSafe enrichment when enabled.')
+    enable = commands.add_parser('enable-jev', help='Enable bounded TypeSafe enrichment for this configured workspace.')
+    enable.add_argument('--backfill-days', type=int, default=0)
+    commands.add_parser('disable-jev', help='Disable automatic TypeSafe calls while preserving recorded labels.')
+    enrichment = commands.add_parser('enrich', help='Classify pending follow-ups and refresh weekly triage when enabled.')
+    enrichment.add_argument('--limit', type=int, default=8)
+    commands.add_parser('status', help='Show capture and background-service status.')
+    view = commands.add_parser('report', help='Print a report from durable captured records.')
+    view.add_argument('--days', type=int, default=7)
+    args = parser.parse_args()
+    if args.command == 'prepare':
+        prepare(args.workspace)
+    elif args.command == 'collect':
+        collect()
+    elif args.command == 'status':
+        status()
+    elif args.command == 'enable-jev':
+        if not 0 <= args.backfill_days <= 7:
+            parser.error('--backfill-days must be between 0 and 7.')
+        config = settings()
+        config['jev'] = {'enabled': True, 'model': 'jev-1.13.0',
+                         'start_at': (dt.datetime.now(dt.timezone.utc) - dt.timedelta(days=args.backfill_days)).isoformat(),
+                         'max_events_per_collection': 8, 'max_events_per_day': 80, 'max_calls_per_day': 12}
+        write_private(CONFIG, json.dumps(config, indent=2) + '\n')
+        print('Enabled Jev enrichment for the configured workspace; next collection sends bounded conversation excerpts to TypeSafe.')
+    elif args.command == 'disable-jev':
+        config = settings()
+        config.setdefault('jev', {})['enabled'] = False
+        write_private(CONFIG, json.dumps(config, indent=2) + '\n')
+        print('Disabled automatic Jev enrichment; captured records are preserved.')
+    elif args.command == 'enrich':
+        if not 1 <= args.limit <= 20:
+            parser.error('--limit must be between 1 and 20.')
+        print(json.dumps(enrich(settings(), args.limit)))
+        report(days=7, save=True)
+    elif args.days < 1:
+        parser.error('--days must be positive')
+    else:
+        report(args.days)
+
+
+if __name__ == '__main__':
+    try:
+        main()
+    except (ValueError, OSError, subprocess.SubprocessError) as error:
+        sys.exit(f'Agent workflow: {error}')

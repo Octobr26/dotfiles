@@ -1,0 +1,168 @@
+#!/usr/bin/env python3
+"""Report skill evidence from local transcripts; optionally ask Jev for review candidates."""
+
+import argparse
+import datetime as dt
+import json
+import os
+from pathlib import Path
+import re
+import runpy
+import sys
+
+ROOT = Path(__file__).resolve().parent.parent
+MANIFEST = ROOT / 'config/skills/matt-pocock-manifest.json'
+SKILL_PATH = re.compile(r'(?:\.codex/skills|\.claude/skills|\.agents/skills|config/skills)/([a-z0-9-]+)/SKILL\.md')
+ENDPOINT = 'https://api.typesafe.ai/v1/systemone'
+
+
+def timestamp(value):
+    try:
+        return dt.datetime.fromisoformat(value.replace('Z', '+00:00')).timestamp()
+    except (AttributeError, ValueError):
+        return None
+
+
+def calls(record, provider):
+    if provider == 'codex':
+        call = record.get('payload', {})
+        if call.get('type') in {'function_call', 'custom_tool_call'}:
+            raw = call.get('arguments', call.get('input', ''))
+            try:
+                value = json.loads(raw)
+            except (ValueError, TypeError):
+                value = {'code': raw}
+            yield call.get('call_id'), call.get('name', ''), value
+    else:
+        content = record.get('message', {}).get('content', [])
+        if isinstance(content, list):
+            for call in content:
+                if call.get('type') == 'tool_use':
+                    yield call.get('id'), call.get('name', ''), call.get('input', {})
+
+
+def classify(tool, value, names):
+    if not isinstance(value, dict):
+        return {}
+    if tool.lower() == 'skill':
+        name = str(value.get('skill', '')).split(':')[-1]
+        return {name: 'invocations'} if name in names else {}
+    if tool.lower() in {'read', 'read_file'}:
+        path = str(value.get('file_path', value.get('path', '')))
+        return {name: 'file_reads' for name in SKILL_PATH.findall(path) if name in names}
+    # Shell/code references may be searches, installation, or edits. Keep them
+    # separate: a mention of a path does not prove the skill was used.
+    raw = json.dumps(value)
+    return {name: 'path_references' for name in SKILL_PATH.findall(raw) if name in names}
+
+
+def report(days):
+    inventory = json.loads(MANIFEST.read_text())
+    rows = {item['name']: {'name': item['name'], 'experimental': item['experimental'],
+            'invocations': 0, 'file_reads': 0, 'path_references': 0, 'sessions': 0}
+            for item in inventory}
+    seen = set()
+    skill_sessions = {name: set() for name in rows}
+    cutoff = dt.datetime.now(dt.timezone.utc).timestamp() - days * 86400
+    files_scanned = sessions_observed = malformed_lines = 0
+    for provider, base in [('codex', Path.home() / '.codex/sessions'),
+                           ('claude', Path.home() / '.claude/projects')]:
+        for path in base.rglob('*.jsonl'):
+            if path.stat().st_mtime < cutoff:
+                continue
+            files_scanned += 1
+            session = (provider, str(path))
+            observed = False
+            with path.open(errors='replace') as stream:
+                for index, line in enumerate(stream):
+                    try:
+                        record = json.loads(line)
+                    except ValueError:
+                        malformed_lines += 1
+                        continue
+                    if not isinstance(record, dict):
+                        malformed_lines += 1
+                        continue
+                    when = timestamp(record.get('timestamp'))
+                    if when is None or when < cutoff:
+                        continue
+                    observed = True
+                    for call_id, tool, value in calls(record, provider):
+                        identity = (provider, call_id or f'{path}:{index}')
+                        if identity in seen:
+                            continue
+                        seen.add(identity)
+                        for name, kind in classify(tool, value, rows).items():
+                            rows[name][kind] += 1
+                            skill_sessions[name].add(session)
+            sessions_observed += int(observed)
+    for name, row in rows.items():
+        row['sessions'] = len(skill_sessions[name])
+    return {'generated_at': dt.datetime.now(dt.timezone.utc).isoformat(), 'days': days,
+            'files_scanned': files_scanned, 'sessions_observed': sessions_observed,
+            'malformed_lines': malformed_lines,
+            'coverage': 'Best-effort Codex and Claude transcript evidence. Invocations and reads are tool calls, not proof of successful application. Shell/code path references are weaker evidence. Auto-loaded context and unsupported tools may be absent. Zero means not observed, not unused.',
+            'skills': sorted(rows.values(), key=lambda r: (-r['invocations'], -r['file_reads'], -r['path_references'], r['name']))}
+
+
+def api_key():
+    if os.environ.get('TYPESAFE_API_KEY'):
+        return os.environ['TYPESAFE_API_KEY']
+    path = Path.home() / '.config/jev/.env'
+    if path.is_file():
+        for line in path.read_text().splitlines():
+            if line.startswith('TYPESAFE_API_KEY='):
+                return line.partition('=')[2].strip().strip('\"\x27')
+    return ''
+
+
+def review(data):
+    questions = {}
+    for index, row in enumerate(data['skills']):
+        questions[f's{index}'] = {
+            'type': 'choice',
+            'instructions': f"For skill `{row['name']}` in `state.skills`, choose whether the evidence supports retaining it, putting it on a human review list, or gathering more data. Path references are not proven use. The collection was recently expanded, and absence of calls alone never proves lack of value. No task-quality, relevance, or opportunity data is available. Do not authorize removal.",
+            'criteria': {'retain': 'Observed invocation or read supports retaining it during evaluation.',
+                         'review': 'There is enough evidence for a human to investigate overlap or overhead; this is not a deletion recommendation.',
+                         'more_data': 'Coverage, observation time, or missing opportunity/outcome data prevents a useful decision.'}}
+    jev = runpy.run_path(str(ROOT / 'config/agents/scripts/workflow-jev.py'))
+    result = jev['evaluate'](data, questions, 'skill-inventory-review')
+    answers = result.get('answers', {})
+    output = []
+    for index, row in enumerate(data['skills']):
+        answer = answers.get(f's{index}', {})
+        if answer.get('choice') not in {'retain', 'review', 'more_data'}:
+            raise ValueError('Jev returned an incomplete or invalid review; no skills were changed.')
+        output.append({'name': row['name'], 'recommendation': answer['choice'],
+                       'confidence': answer.get('confidence'), 'probabilities': answer.get('probabilities')})
+    return {'model': result.get('model'), 'usage': result.get('usage'),
+            'latency_ms': result['latency_ms'], 'call_id': result['call_id'],
+            'skills': output, 'action': 'Suggestions only; no skills disabled or removed.'}
+
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument('--days', type=int, default=30)
+    parser.add_argument('--json', action='store_true')
+    parser.add_argument('--jev', action='store_true', help='Send aggregate skill counts only to Jev for a review list.')
+    args = parser.parse_args()
+    if args.days < 1:
+        parser.error('--days must be positive')
+    data = report(args.days)
+    if args.jev:
+        data['jev_review'] = review(data)
+    if args.json or args.jev:
+        print(json.dumps(data, indent=2))
+    else:
+        print(f"{len(data['skills'])} skills | {data['sessions_observed']} transcript files with recent activity | {args.days} days")
+        print('Skill                              Invocations  Reads  Path references')
+        for row in data['skills']:
+            print(f"{row['name']:34} {row['invocations']:11} {row['file_reads']:6} {row['path_references']:16}")
+        print(data['coverage'])
+
+
+if __name__ == '__main__':
+    try:
+        main()
+    except (ValueError, OSError) as error:
+        sys.exit(str(error))
