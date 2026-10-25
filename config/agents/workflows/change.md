@@ -46,7 +46,7 @@
    A refactor that rebuilds a definition another structure must match by position is not exempt as mechanical: add the order assertion described in [Test and author checks](review.md#test-and-author-checks) in the same change.
    Rerun affected checks after fixes and complete the project's required gates, recording actual results and remaining limits.
 9. Reviewer checks the final result against acceptance criteria, raw verification, and surrounding impact before seeing the Implementer's defense.
-   Apply the finding gate and concise output rules in [review.md](review.md); omit optional preferences unless requested and preserve material unknowns.
+   Apply the [finding gate](review.md#finding-gate) and [concise output rules](review.md#concise-review-output), preserving their distinction between unsupported preferences and concrete non-blocking findings.
 10. Adjudicator closes any material review finding under `challenge.md`.
 
 For a cross-project change, freeze the shared interface or decision before independent implementation begins.

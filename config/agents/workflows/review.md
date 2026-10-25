@@ -89,7 +89,7 @@ Check whether an existing test already covers the case.
 For each added test, identify the distinct incorrect behavior it rejects; consolidate overlapping coverage while preserving unique boundary cases.
 For changed test groups, trace the production import and each changing input through the actual function/query/service boundary to the distinguishing assertion. Name intentionally bypassed boundaries; parameterized labels or assertion-only inputs do not establish distinct behavior.
 Test and mutation-check results validate behavior against assertions, not the policy encoded in those assertions.
-Carry each relevant prior finding's source, original counterexample and disposition through the final-head check: fixed with evidence, refuted with evidence, or unresolved with its next check. Re-exercise the discriminating case or cite decisive source evidence at the final revision; a changed requirement needs its recorded authority.
+Carry each relevant prior finding's source, original counterexample and disposition through the final-head check: fixed with evidence, refuted with evidence, explicitly deferred, or unresolved with its next check. Re-exercise the discriminating case or cite decisive source evidence at the final revision; a changed requirement needs its recorded authority.
 A test-gap finding that meets the bar above is refuted only by naming the existing assertion that fails on its counterexample; earlier manual comparison, low priority, or reluctance to repeat a list does not refute it.
 Keep it open with the smallest assertion that closes it, or record Luis's explicit deferral.
 When Luis asks which comments a reviewer would still leave, start from findings still open or deferred without that evidence and from PR-description claims without matching coverage, then use the reviewer's history.
@@ -99,6 +99,9 @@ For metric comparisons, verify both sides use the same formula, provider populat
 Exercise optional-request failure with usable primary data, missing versus null fields, inactive roster rows, and configured overrides when those paths affect the change.
 When separate queries feed one result, record their keys and organization/filter identity, placeholder scope and consumer readiness. Distinguish same-key refetch from changed-key placeholder; challenge organization switches, either response arriving first, optional failure and relevant combinations such as placeholder primary data plus optional error. Derive expected display/export and state-preservation behavior from the established contract, without enumerating every flag combination.
 For shared UI changes, inspect representative real page containers and keyboard behavior; isolated component checks do not establish scroll offsets, overflow ownership, or focus order in those pages.
+For changed status/loading messages or grouped controls, inspect the rendered semantic association between the message or label and its region or control; a role/name lookup or visible-text assertion alone does not establish that relationship.
+For status regions, check meaningful message text when populated and the empty-to-populated transition; preserve intentionally mounted empty regions and check their empty layout.
+Record actual assistive-technology observations separately from DOM or accessibility-tree inspection.
 When UI text, accessible names, or roles change, search end-to-end tests and page objects (such as `end-to-end-tests/`) for the old value alongside production and unit-test consumers, and account for every affected selector before concluding the review.
 Hover- or focus-only content must not keep a library's default dialog role or be the only route to its information; base tab stops on the real need, such as truncation, not on tooltip presence.
 For sticky headers, check page, bounded-card, and preview-pane scroll owners separately, including horizontal overflow at a narrow viewport; record untested hosts as incomplete rather than checking aggregate verification boxes.
@@ -136,6 +139,9 @@ If the full check is blocked, report verification as incomplete and name the blo
 - Omit unsupported stylistic preferences.
   Report concrete non-blocking improvements when the change leaves wasted work, misleading controls, unreachable code or a maintenance consequence; explain the consequence and whether a scoped follow-up covers it.
   Keep actual defects and mandatory project-rule violations even when their fixes are small.
+- Carry still-relevant deferred findings into the review handoff and, when writing a PR description, its known limitations: source, concrete trigger and consequence, scope and reason, and recorded authority where required.
+  Name an existing follow-up or state that none is assigned.
+  Report repeated feedback with the existing deferral and its authority; reassess when evidence or an authorized decision changes the basis for deferral.
 - Omit empty severity sections, reviewer counts, routing details, retraction counts, and repeated summaries unless requested.
   Never hide a material defect or use a finding quota to reduce comment count.
 - End with the verdict and actual checks; include material limits and the next verification path when needed.
