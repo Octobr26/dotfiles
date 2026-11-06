@@ -10,6 +10,10 @@ import shutil
 import sys
 import tempfile
 
+# Dispatch only tools the adapter can gate: native file edits and shell commands.
+# Codex reports shell calls (exec_command included) as Bash and patches as apply_patch.
+PRE_TOOL_MATCHERS = {'claude': 'Write|Edit|Bash', 'codex': 'apply_patch|Bash'}
+
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
@@ -44,7 +48,8 @@ def main():
                        'statusMessage': 'Checking readiness ' + ('plan' if event == 'PreToolUse' else 'evidence')}
             if provider == 'claude' and event == 'PreToolUse':
                 handler['onFailure'] = 'block'
-            groups.append({'matcher': '*', 'hooks': [handler]} if event == 'PreToolUse' else {'hooks': [handler]})
+            groups.append({'matcher': PRE_TOOL_MATCHERS[provider], 'hooks': [handler]}
+                          if event == 'PreToolUse' else {'hooks': [handler]})
             hooks[event] = groups
         encoded = json.dumps(config, indent=2) + '\n'
         if path.exists() and path.read_text() == encoded:

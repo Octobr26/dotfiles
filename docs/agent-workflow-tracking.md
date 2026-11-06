@@ -18,6 +18,22 @@ agent-workflow report --days 7
 nvim ~/.local/state/agent-workflow/reports/latest.md
 ```
 
+Record your own verdict on a delivered turn when you have one; nothing else sets it:
+
+```sh
+agent-workflow outcome <provider>:<session>:<turn> --kind acceptance
+agent-workflow outcome <provider>:<session>:<turn> --kind correction --note "missed the empty state"
+```
+
+Copy the key from the report's "Explicit outcomes" section, which lists the latest unrated completed turns and shows explicit-outcome coverage over completed turns.
+Keys must match a turn the collector already captured; unknown keys are rejected rather than assigned to the newest turn.
+Outcomes are append-only: a later acceptance after a correction becomes the current state, and an identical repeat is ignored.
+Hooks, commits, passing tests, Jev labels and silence never set an outcome; unrated turns stay unknown.
+The retired CVO logical-task commands in `workflow-metrics.mjs` are not used for outcomes; that script remains the collector's transcript parser.
+
+Replay deterministic private experiments on request with `agent-workflow-replay` (default directory `~/.local/state/agent-workflow/experiments/`).
+It runs top-level unittest files and `replay.json` manifests (`{"cases": [{"id", "argv", "expected_exit"}]}`), prints passed, failed and non-automated sections, exits nonzero on a failed expectation and writes no files.
+
 Ask either agent: "Review my agent-workflow report, reconcile related GitKraken sessions using ticket/PR/commit evidence, and suggest one change to reduce waiting."
 The generated daily report lists observed usage, models/effort, skill-loading evidence, Git activity, and the longest sessions to investigate.
 Reconciliation by an agent is an on-demand review; the scheduled recorder does not infer semantic task completion or query GitHub/Notion.

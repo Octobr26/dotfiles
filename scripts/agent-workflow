@@ -31,6 +31,8 @@ TURN_FIELDS = ('taskKey', 'sessionId', 'turnId', 'provider', 'startedAtMs',
                'cachedInputTokens', 'outputTokens', 'reasoningOutputTokens',
                'totalTokens', 'usageEvents', 'toolCalls', 'toolFailures', 'usageStatus')
 INTERVAL_SECONDS = 300
+OUTCOME_PROVIDERS = ('codex', 'claude')
+UNRATED_LISTED = 15
 COUNTER_FIELDS = ('inputTokens', 'cachedInputTokens', 'outputTokens',
                   'reasoningOutputTokens', 'usageEvents', 'toolCalls', 'toolFailures')
 
@@ -75,6 +77,9 @@ def connect():
       CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT);
       CREATE TABLE IF NOT EXISTS interactions (
         event_id TEXT PRIMARY KEY, timestamp REAL, version TEXT, data TEXT);
+      CREATE TABLE IF NOT EXISTS outcomes (
+        id INTEGER PRIMARY KEY AUTOINCREMENT, provider TEXT, turn_key TEXT,
+        kind TEXT, note TEXT, timestamp REAL);
     ''')
     (STATE / 'history.sqlite').chmod(0o600)
     return db
@@ -446,6 +451,8 @@ def report(days=7, save=False):
         commits = list(db.execute('SELECT repo,COUNT(*) FROM commits WHERE timestamp>=? GROUP BY repo', (cutoff,)))
         last = db.execute('SELECT value FROM meta WHERE key="collection"').fetchone()
         enrichment_lines = jev_report(db, config, cutoff)
+        latest_outcomes = {(provider, key): kind for provider, key, kind in
+                           db.execute('SELECT provider, turn_key, kind FROM outcomes ORDER BY id')}
     last = json.loads(last[0]) if last else {}
     lines = [f'# Agent workflow: last {days} days', '', f'Generated: {dt.datetime.now(dt.timezone.utc).isoformat()}',
              f'Workspace: {config["workspace"]}', f'Last successful capture: {last.get("last_success", "not collected")}', '',
@@ -508,6 +515,7 @@ def report(days=7, save=False):
               f'Capture coverage: {last.get("malformed_lines", 0)} malformed lines on last changed-file scan; {last.get("git_scan_errors", 0)} Git scan errors.',
               'Polling is every five minutes while logged in and awake. Files removed before capture, unsupported telemetry and unflushed turns can be missed.', '']
     lines += enrichment_lines
+    lines += outcome_lines(turns, latest_outcomes, config)
     session_rows = {}
     for turn in turns:
         session_rows.setdefault((turn['provider'], turn['sessionId']), []).append(turn)
@@ -535,6 +543,46 @@ def report(days=7, save=False):
         write_private(STATE / f'reports/{day}.md', result)
     else:
         print(result)
+
+
+def record_outcome(key, kind, note):
+    """Append Luis's explicit feedback for one captured turn; never inferred."""
+    provider, separator, turn_key = key.partition(':')
+    if provider not in OUTCOME_PROVIDERS or not separator or ':' not in turn_key:
+        raise ValueError('Use the full <provider>:<session>:<turn> key from the report.')
+    with connect() as db:
+        db.execute('BEGIN IMMEDIATE')
+        if not db.execute('SELECT 1 FROM turns WHERE provider=? AND turn_key=?', (provider, turn_key)).fetchone():
+            raise ValueError(f'No captured turn {key}; run agent-workflow collect or copy a key from the report.')
+        latest = db.execute('SELECT kind, note FROM outcomes WHERE provider=? AND turn_key=? ORDER BY id DESC LIMIT 1',
+                            (provider, turn_key)).fetchone()
+        if latest == (kind, note):
+            print(f'Already recorded {kind} for {key}.')
+            return
+        db.execute('INSERT INTO outcomes (provider, turn_key, kind, note, timestamp) VALUES (?,?,?,?,?)',
+                   (provider, turn_key, kind, note, dt.datetime.now(dt.timezone.utc).timestamp()))
+    print(f'Recorded {kind} for {key}.')
+
+
+def outcome_lines(turns, latest_outcomes, config):
+    completed = [turn for turn in turns if turn.get('complete')]
+    rated = [turn for turn in completed if (turn['provider'], turn['taskKey']) in latest_outcomes]
+    states = Counter(latest_outcomes[(turn['provider'], turn['taskKey'])] for turn in rated)
+    unrated = sorted((turn for turn in completed if (turn['provider'], turn['taskKey']) not in latest_outcomes),
+                     key=lambda turn: turn.get('completedAtMs') or turn.get('startedAtMs') or 0, reverse=True)
+    zone = ZoneInfo(config['timezone'])
+    lines = ['## Explicit outcomes', '',
+             f'Explicit outcome coverage: {len(rated)}/{len(completed)} completed turns.',
+             f'Current explicit state: acceptance {states["acceptance"]}, correction {states["correction"]}.',
+             'Recorded only by `agent-workflow outcome <provider>:<session>:<turn> --kind acceptance|correction [--note TEXT]`.',
+             'Missing outcomes stay unknown: hooks, commits, passing tests, Jev labels and silence never set them.', '',
+             f'Unrated completed turns (latest {min(len(unrated), UNRATED_LISTED)} of {len(unrated)}):', '']
+    for turn in unrated[:UNRATED_LISTED]:
+        started = turn.get('startedAtMs')
+        when = dt.datetime.fromtimestamp(started / 1000, zone).strftime('%Y-%m-%d %H:%M') if started else 'unknown time'
+        minutes = f'{turn["durationMs"] / 60000:.1f} min' if turn.get('durationMs') is not None else 'unknown duration'
+        lines.append(f'- `{turn["provider"]}:{turn["taskKey"]}` · {when} · {turn.get("model") or "unknown model"} · {minutes}')
+    return lines + ['']
 
 
 def prepare(workspace):
@@ -592,8 +640,14 @@ def main():
     commands.add_parser('status', help='Show capture and background-service status.')
     view = commands.add_parser('report', help='Print a report from durable captured records.')
     view.add_argument('--days', type=int, default=7)
+    feedback = commands.add_parser('outcome', help='Record your explicit acceptance or correction for one captured turn.')
+    feedback.add_argument('key', help='<provider>:<session>:<turn>, as listed in the report.')
+    feedback.add_argument('--kind', required=True, choices=('acceptance', 'correction'))
+    feedback.add_argument('--note', help='Optional short reason, kept privately.')
     args = parser.parse_args()
-    if args.command == 'prepare':
+    if args.command == 'outcome':
+        record_outcome(args.key, args.kind, args.note)
+    elif args.command == 'prepare':
         prepare(args.workspace)
     elif args.command == 'collect':
         collect()

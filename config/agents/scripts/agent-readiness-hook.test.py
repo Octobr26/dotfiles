@@ -242,6 +242,76 @@ class NativeHookTests(unittest.TestCase):
         result = subprocess.run([sys.executable, str(HOOK)], input='not JSON', text=True, capture_output=True)
         self.assertEqual(result.returncode, 2)
 
+    SHELL_EDIT = 'supported shell edit in a protected repository must require readiness'
+
+    def supported_shell_edits(self):
+        target = str(self.repo / 'behavior.py')
+        patch = "apply_patch <<'EOF'\n*** Begin Patch\n*** Update File: behavior.py\n@@\n-a\n+b\n*** End Patch\nEOF"
+        return [('Bash', {'command': "sed -i '' s/a/b/ behavior.py"}),
+                ('Bash', {'command': "perl -pi -e 's/a/b/' " + target}),
+                ('Bash', {'command': 'echo x > behavior.py'}),
+                ('Bash', {'command': 'echo x >> behavior.py'}),
+                ('Bash', {'command': 'printf x | tee behavior.py'}),
+                ('Bash', {'command': "cat > behavior.py <<'EOF'\nvalue = 1\nEOF"}),
+                ('Bash', {'command': patch}),
+                ('exec_command', {'cmd': patch}),
+                ('exec_command', {'cmd': 'git status && echo x > behavior.py'}),
+                ('Bash', {'command': "echo 'a > b' > behavior.py"}),
+                ('Bash', {'command': 'git status\necho x > behavior.py'})]
+
+    def passing_shell_forms(self):
+        outside = str(self.fixture.root / 'outside.txt')
+        return [('Bash', {'command': 'git status --short'}),
+                ('Bash', {'command': 'rg -n value behavior.py'}),
+                ('Bash', {'command': "cat <<'EOF'\na > behavior.py\nEOF"}),
+                ('Bash', {'command': "grep 'a > behavior.py' behavior.py"}),
+                ('Bash', {'command': 'grep ">" behavior.py'}),
+                ('Bash', {'command': "echo x '>' behavior.py"}),
+                ('Bash', {'command': 'cd sub\necho x > behavior.py'}),
+                ('Bash', {'command': '[[ a > b ]] && echo yes'}),
+                ('Bash', {'command': 'pnpm test 2>&1'}),
+                ('Bash', {'command': 'git log > /dev/null'}),
+                ('Bash', {'command': 'echo x > ' + outside}),
+                ('Bash', {'command': 'echo "unterminated > behavior.py'}),
+                ('Bash', {'command': str(readiness_tests.CLI) + ' capture --record r --id s --kind source -- cat behavior.py'}),
+                ('exec_command', {'cmd': 'pwd; rg --files -g "*column*" .'})]
+
+    def assert_shell_decisions(self, expected_edit):
+        for tool, arguments in self.supported_shell_edits():
+            with self.subTest(tool=tool, arguments=arguments):
+                result = self.hook(required=True, tool=tool, arguments=arguments)
+                self.assertEqual(result.returncode, expected_edit, self.SHELL_EDIT + ': ' + result.stderr)
+        for tool, arguments in self.passing_shell_forms():
+            with self.subTest(tool=tool, arguments=arguments):
+                result = self.hook(required=True, tool=tool, arguments=arguments)
+                self.assertEqual(result.returncode, 0, result.stderr)
+
+    def test_supported_shell_edits_are_denied_without_enrollment(self):
+        self.assert_shell_decisions(2)
+
+    def test_supported_shell_edits_are_denied_without_accepted_plan(self):
+        self.enroll()
+        self.assert_shell_decisions(2)
+
+    def test_supported_shell_edits_are_denied_for_review_records(self):
+        self.fixture.initialize('review')
+        self.fixture.source()
+        self.fixture.accepted_plan()
+        self.assert_shell_decisions(2)
+
+    def test_supported_shell_edits_follow_an_accepted_implementation_plan(self):
+        self.enroll()
+        self.fixture.source()
+        self.fixture.accepted_plan()
+        self.assert_shell_decisions(0)
+
+    def test_readiness_doc_lists_unsupported_shell_forms(self):
+        text = (HERE.parent / 'workflows/readiness.md').read_text()
+        self.assertTrue('Unsupported shell forms' in text, self.SHELL_EDIT + ': readiness.md lacks the list')
+        listed = text.split('Unsupported shell forms', 1)[-1].split('\n\n', 1)[0]
+        for form in ('cd', '$(', 'cp', 'mv', 'rm', 'sh -c', 'git apply', 'python'):
+            self.assertTrue(form in listed, 'unsupported shell form is undocumented: ' + form)
+
 
 if __name__ == '__main__':
     unittest.main()

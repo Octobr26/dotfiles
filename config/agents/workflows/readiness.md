@@ -167,10 +167,16 @@ Changing expectations or plan-time decisions requires a fresh assessment and pla
 
 Install personal hooks with `agent-readiness-install-hooks --require-for <workspace-root>` (repeat for additional roots), then review the exact definitions in Codex `/hooks` and start a fresh Claude session.
 The personal `agent-readiness-hook` adapter consumes native session IDs and the index written by `init`; `AGENT_READINESS_STATE_DIR` selects an isolated private state directory when testing.
-Its configured workspace roots require enrollment before explicit `Write`, `Edit` and `apply_patch` repository edits; outside them, only enrolled sessions are gated.
+Its configured workspace roots require enrollment before explicit `Write`, `Edit` and `apply_patch` repository edits and before the known shell edit forms below; outside them, only enrolled sessions are gated.
+The installer dispatches readiness only for `Write|Edit|Bash` in Claude and `apply_patch|Bash` in Codex, so reads and searches never start the adapter.
 Before a covered edit it runs the implementation check; private readiness and experiment files remain writable for evidence preparation.
-Clarification, discovery, coordination, shell commands and other tools retain their normal provider permissions, even when a readiness record is missing or incomplete.
-The adapter does not infer shell or MCP side effects: shell-based edits are outside its automatic enforcement, and agents must still run the implementation check before behavior changes regardless of the editing tool.
+Clarification, discovery, coordination, other shell commands and other tools retain their normal provider permissions, even when a readiness record is missing or incomplete.
+For `Bash` (and Codex `exec_command`) the adapter applies a small deterministic match, not a shell interpreter: `sed -i`, `perl -i`/`-pi`, output redirection (`>`, `>>`, `>|`, `&>`), `tee`, and `apply_patch` patch headers, resolved against the call's working directory.
+A recognized target inside a protected repository gets the same decision as a native edit; heredoc bodies, quoted text, `[[ ]]` tests, `/dev/*`, file-descriptor redirects and unparseable commands pass, and any parse or enrollment error on a shell call passes rather than blocking.
+
+Unsupported shell forms pass without a readiness decision and remain the agent's responsibility: relative targets after `cd`; targets containing variables, globs, `~` or `$(` command substitution; `cp`, `mv`, `rm`, `touch`, `ln` and `install`; `git apply`, `git checkout` and `git restore`; `python`, `node` or Codex `js` file writes; `sh -c`, `bash -c` and `eval` strings; `xargs`; MCP tools; and Claude `NotebookEdit`.
+
+Agents must still run the implementation check before behavior changes regardless of the editing tool.
 At Stop, the final check supplies an advisory result for enrolled work and never forces another turn; ending an investigation or asking a question is not a readiness claim.
 Run the explicit final check before claiming readiness, and report any missing evidence without manufacturing a pass.
 Provider configuration and exact-definition trust must be active for hooks to run; installation alone is not runtime verification.

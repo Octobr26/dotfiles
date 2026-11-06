@@ -1,0 +1,116 @@
+#!/usr/bin/env python3
+"""Run the agent harness's deterministic local checks against isolated synthetic state.
+
+Never reads private workflow state or experiments and never runs the private replay.
+"""
+import argparse
+import os
+from pathlib import Path
+import subprocess
+import sys
+import tempfile
+
+SUITE_DIR = 'config/agents/scripts'
+ROOT_SCRIPTS = ('setup', 'setup-luis', 'install.sh')
+ZSH_SOURCES = ('zsh_stuff',)  # Sourced by zsh; has no shebang.
+SUITE_TIMEOUT_SECONDS = 900
+FAILURE_TAIL_LINES = 40
+
+
+def interpreter(path):
+    try:
+        with path.open('rb') as stream:
+            first = stream.readline().decode('utf-8', 'replace')
+    except OSError:
+        return None
+    if not first.startswith('#!'):
+        return None
+    words = first[2:].split()
+    if words and Path(words[0]).name == 'env' and len(words) > 1:
+        words = words[1:]
+    name = Path(words[0]).name if words else ''
+    if name in ('bash', 'sh'):
+        return 'bash'
+    if name == 'zsh':
+        return 'zsh'
+    if name.startswith('python'):
+        return 'python'
+    return None
+
+
+def syntax_targets(repo):
+    targets = []
+    scripts = repo / 'scripts'
+    if scripts.is_dir():
+        for path in sorted(scripts.iterdir()):
+            kind = interpreter(path) if path.is_file() else None
+            if kind:
+                targets.append((kind, path))
+    for name in ROOT_SCRIPTS:
+        path = repo / name
+        if path.is_file():
+            targets.append((interpreter(path) or 'bash', path))
+    for name in ZSH_SOURCES:
+        path = repo / name
+        if path.is_file():
+            targets.append(('zsh', path))
+    return targets
+
+
+def isolated_environment(scratch):
+    home = scratch / 'home'
+    # Empty provider directories keep transcript-scanning suites off real sessions.
+    for directory in ('.codex/sessions', '.claude/projects'):
+        (home / directory).mkdir(parents=True)
+    return {**os.environ, 'HOME': str(home), 'AGENT_READINESS_STATE_DIR': str(scratch / 'readiness-state'),
+            'PYTHONDONTWRITEBYTECODE': '1'}
+
+
+def run(argv, repo, env, timeout=120):
+    try:
+        result = subprocess.run(argv, cwd=repo, env=env, capture_output=True, text=True, timeout=timeout)
+    except (OSError, subprocess.TimeoutExpired) as error:
+        return False, str(error)
+    return result.returncode == 0, result.stdout + result.stderr
+
+
+def checks(repo, env):
+    yield 'whitespace', 'unstaged', ['git', 'diff', '--check'], 120
+    yield 'whitespace', 'staged', ['git', 'diff', '--cached', '--check'], 120
+    for kind, path in syntax_targets(repo):
+        target = str(path.relative_to(repo))
+        if kind == 'python':
+            yield 'python-syntax', target, [sys.executable, '-c',
+                                            'import sys; compile(open(sys.argv[1], "rb").read(), sys.argv[1], "exec")',
+                                            str(path)], 120
+        else:
+            yield kind + '-syntax', target, [kind, '-n', str(path)], 120
+    suites = repo / SUITE_DIR
+    for path in sorted(suites.glob('*.test.py')) if suites.is_dir() else []:
+        yield 'test', str(path.relative_to(repo)), [sys.executable, '-I', str(path)], SUITE_TIMEOUT_SECONDS
+    for path in sorted(suites.glob('*.test.mjs')) if suites.is_dir() else []:
+        yield 'test', str(path.relative_to(repo)), ['node', '--test', str(path)], SUITE_TIMEOUT_SECONDS
+
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
+    parser.add_argument('--repo', type=Path, default=Path(__file__).resolve().parent.parent,
+                        help='Repository to check (default: this dotfiles checkout).')
+    args = parser.parse_args()
+    repo = args.repo.resolve()
+    failed = []
+    with tempfile.TemporaryDirectory(prefix='harness-check-') as scratch:
+        env = isolated_environment(Path(scratch))
+        for kind, target, argv, timeout in checks(repo, env):
+            passed, output = run(argv, repo, env, timeout)
+            print(('PASS ' if passed else 'FAIL ') + kind + ' ' + target, flush=True)
+            if not passed:
+                failed.append(kind + ' ' + target)
+                for line in output.strip().splitlines()[-FAILURE_TAIL_LINES:]:
+                    print('    ' + line)
+    print(f'{len(failed)} failed check(s)' + (': ' + ', '.join(failed) if failed else ''))
+    return 1 if failed else 0
+
+
+if __name__ == '__main__':
+    sys.exit(main())

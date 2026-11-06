@@ -13,6 +13,14 @@ import sys
 CLI = Path(__file__).resolve().with_name('agent-readiness')
 MAX_JSON_BYTES = 2 * 1024 * 1024
 EDIT_TOOLS = frozenset(('Write', 'Edit', 'apply_patch'))
+# Shell tools get a bounded check for known direct edit forms only; see readiness.md.
+SHELL_TOOLS = frozenset(('Bash', 'exec_command'))
+PATCH_FILES = re.compile(r'^\*\*\* (?:Add File|Update File|Delete File|Move to): (.+)$', re.MULTILINE)
+HEREDOC = re.compile(r"<<-?[ \t]*(['\"]?)([A-Za-z_][A-Za-z0-9_]*)\1[^\n]*\n.*?^[ \t]*\2[ \t]*$",
+                     re.DOTALL | re.MULTILINE)
+SEPARATORS = frozenset((';', ';;', '&&', '||', '|', '|&', '&', '(', ')'))
+REDIRECTS = frozenset(('>', '>>', '>|', '&>', '&>>'))
+UNRESOLVABLE = re.compile(r'[$`*?\[\]{}~]')
 
 
 def read_json(path):
@@ -51,9 +59,103 @@ def enrollment(payload, state_dir):
     return matched[0] if matched else None
 
 
+def shell_command(arguments):
+    value = arguments.get('command', arguments.get('cmd')) if isinstance(arguments, dict) else arguments
+    if isinstance(value, list) and all(isinstance(part, str) for part in value):
+        value = value[-1] if len(value) >= 3 and value[-2] in ('-c', '-lc') else shlex.join(value)
+    return value if isinstance(value, str) else ''
+
+
+def segment_targets(words, cwd):
+    """Return (targets, cwd_known) for one simple command; only the listed edit forms count."""
+    if not words:
+        return [], True
+    while words and re.fullmatch(r'[A-Za-z_][A-Za-z0-9_]*=.*', words[0]):
+        words = words[1:]
+    name = Path(words[0]).name if words else ''
+    arguments = words[1:]
+    if name == 'cd':
+        return [], False
+    files = []
+    if name == 'sed' and any(arg == '-i' or arg.startswith(('-i', '--in-place')) for arg in arguments):
+        script_given, index = False, 0
+        while index < len(arguments):
+            arg = arguments[index]
+            if arg == '-i' and index + 1 < len(arguments) and arguments[index + 1] == '':
+                index += 1
+            elif arg in ('-e', '-f'):
+                script_given, index = True, index + 1
+            elif not arg.startswith('-'):
+                if script_given:
+                    files.append(arg)
+                else:
+                    script_given = True
+            index += 1
+    elif name == 'perl':
+        in_place, index = False, 0
+        while index < len(arguments):
+            arg = arguments[index]
+            if arg.startswith('-') and not arg.startswith('--'):
+                in_place = in_place or 'i' in arg[1:].split('e')[0] or arg.startswith('-i')
+                if arg.endswith('e') or arg == '-e':
+                    index += 1
+            else:
+                files.append(arg)
+            index += 1
+        files = files if in_place else []
+    elif name == 'tee':
+        files = [arg for arg in arguments if not arg.startswith('-')]
+    return files, True
+
+
+def shell_edit_paths(payload):
+    """Targets of known direct shell edits; unsupported or unresolvable forms yield nothing."""
+    command = shell_command(payload.get('tool_input'))
+    cwd = Path(payload['cwd'])
+    targets = []
+    if '*** Begin Patch' in command:
+        targets.extend(cwd / name.strip() for name in PATCH_FILES.findall(command))
+    try:
+        # Non-POSIX lexing keeps quotes, so a quoted '>' or ';' is never an operator.
+        lexer = shlex.shlex(HEREDOC.sub('', command).replace('\n', ' ; '), posix=False, punctuation_chars=True)
+        lexer.whitespace_split = True
+        raw = list(lexer)
+        values = [''.join(shlex.split(token)) if any(quote in token for quote in '\'"') else token for token in raw]
+    except ValueError:
+        return [path.resolve() for path in targets]
+    operator = lambda position: raw[position] == values[position] and raw[position]
+    names, cwd_known, words, in_test, index = [], True, [], False, 0
+    while index <= len(raw):
+        token = operator(index) if index < len(raw) else ';'
+        if token == '[[':
+            in_test = True
+        elif token == ']]':
+            in_test = False
+        if not in_test and token in REDIRECTS and index + 1 < len(raw):
+            names.append((values[index + 1], cwd_known))
+            index += 2
+            continue
+        if not in_test and token in SEPARATORS:
+            found, still_known = segment_targets(words, cwd)
+            names.extend((name, cwd_known) for name in found)
+            cwd_known, words = cwd_known and still_known, []
+        elif not in_test and token not in ('<', '<<', '<<<', '>&', '<&', ']]'):
+            words.append(values[index])
+        index += 1
+    for name, known in names:
+        if not name or name.startswith('/dev/') or UNRESOLVABLE.search(name):
+            continue
+        path = Path(name)
+        if path.is_absolute() or known:
+            targets.append(path if path.is_absolute() else cwd / path)
+    return [path.resolve() for path in targets]
+
+
 def edit_paths(payload):
     arguments = payload.get('tool_input', {})
     cwd = Path(payload['cwd'])
+    if payload.get('tool_name') in SHELL_TOOLS:
+        return shell_edit_paths(payload)
     if payload.get('tool_name') == 'apply_patch':
         patch = arguments if isinstance(arguments, str) else arguments.get('command', '') if isinstance(arguments, dict) else ''
         if not isinstance(patch, str):
@@ -117,14 +219,23 @@ def main():
         raise ValueError('Unsupported native hook event: ' + event)
     if event == 'PreToolUse' and (not isinstance(payload.get('tool_name'), str) or 'tool_input' not in payload):
         raise ValueError('PreToolUse needs tool_name and tool_input.')
-    # Only explicit file edits carry a reliable mutation target. Shells, MCP,
-    # clarification and coordination retain the provider's normal permissions.
-    # An incomplete or stale record must not prevent gathering its evidence.
-    if event == 'PreToolUse' and payload['tool_name'] not in EDIT_TOOLS:
+    # Explicit file edits and known direct shell edits carry a mutation target.
+    # Other shell commands, MCP, clarification and coordination retain the
+    # provider's normal permissions; a stale record must not block evidence.
+    shell = event == 'PreToolUse' and payload['tool_name'] in SHELL_TOOLS
+    if event == 'PreToolUse' and not shell and payload['tool_name'] not in EDIT_TOOLS:
         return 0
+    if shell:
+        try:
+            if not shell_edit_paths(payload):
+                return 0
+        except (OSError, ValueError, TypeError, RuntimeError):
+            return 0  # The shell check is best effort; it never fails closed.
     try:
         enrolled = enrollment(payload, args.state_dir)
     except (OSError, ValueError, KeyError, TypeError) as error:
+        if shell:
+            return 0
         if event != 'Stop':
             raise
         print(json.dumps({'systemMessage': 'Readiness could not be checked; no acceptance is implied. ' + str(error)}))
@@ -146,9 +257,14 @@ def main():
         return 0
     path, record = enrolled
     if event == 'PreToolUse':
-        if record.get('mode') == 'review' and payload['tool_name'] in ('Write', 'Edit', 'apply_patch'):
+        if record.get('mode') == 'review' and payload['tool_name'] in EDIT_TOOLS | SHELL_TOOLS:
             return deny('a review record does not authorize repository file edits; enroll an implementation task.')
-        passed, diagnostic = verify(path, 'implementation')
+        try:
+            passed, diagnostic = verify(path, 'implementation')
+        except (OSError, subprocess.SubprocessError):
+            if shell:
+                return 0
+            raise
         return 0 if passed else deny('accepted plan required before this tool. ' + diagnostic)
     # Ending a response is not a readiness claim: investigations and questions
     # must be able to finish. Explicit final checks still decide readiness.

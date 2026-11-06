@@ -44,4 +44,7 @@ This repo is personal shell and terminal setup. Keep changes narrow and preserve
 
 - Always run `git diff --check` before finishing.
 - When touching shell scripts, run `bash -n <script>`.
+- When touching agent harness scripts, tests, hooks or workflows, run `scripts/harness-check` (about a minute; isolated temp state, no private records or network).
+  Optional local pre-commit: `printf '#!/bin/sh\nexec scripts/harness-check\n' > .git/hooks/pre-commit && chmod +x .git/hooks/pre-commit`; check for an existing hook first.
+- The private experiment replay, `scripts/agent-workflow-replay`, is separate and run on request only.
 - When checking sync after push, use `git rev-list --left-right --count origin/main...main`.
