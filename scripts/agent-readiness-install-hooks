@@ -1,0 +1,70 @@
+#!/usr/bin/env python3
+"""Install personal readiness hooks without replacing other provider settings."""
+import argparse
+from datetime import datetime, timezone
+import json
+import os
+from pathlib import Path
+import shlex
+import shutil
+import sys
+import tempfile
+
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument('--require-for', type=Path, action='append', required=True,
+                        help='Workspace root requiring a reviewed plan before covered edits.')
+    args = parser.parse_args()
+    os.umask(0o077)
+    adapter = Path(__file__).resolve().with_name('agent-readiness-hook')
+    if not adapter.is_file():
+        parser.error('Missing readiness hook adapter.')
+    command = shlex.join([sys.executable, str(adapter)] +
+                         [part for root in args.require_for for part in ('--require-for', str(root.resolve()))])
+    backup = Path.home() / '.local/state/agent-workflow/hook-backups' / datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%S%fZ')
+    for provider, filename in (('codex', 'hooks.json'), ('claude', 'settings.json')):
+        path = Path.home() / ('.' + provider) / filename
+        config = json.loads(path.read_text()) if path.exists() else {}
+        hooks = config.setdefault('hooks', {})
+        for event in ('PreToolUse', 'Stop'):
+            groups = []
+            for group in hooks.get(event, []):
+                retained = []
+                for handler in group.get('hooks', []):
+                    try:
+                        argv = shlex.split(handler.get('command', ''))
+                    except ValueError:
+                        argv = []
+                    if str(adapter) not in argv[:2]:
+                        retained.append(handler)
+                if retained:
+                    groups.append({**group, 'hooks': retained})
+            handler = {'type': 'command', 'command': command, 'timeout': 30,
+                       'statusMessage': 'Checking readiness ' + ('plan' if event == 'PreToolUse' else 'evidence')}
+            if provider == 'claude' and event == 'PreToolUse':
+                handler['onFailure'] = 'block'
+            groups.append({'matcher': '*', 'hooks': [handler]} if event == 'PreToolUse' else {'hooks': [handler]})
+            hooks[event] = groups
+        encoded = json.dumps(config, indent=2) + '\n'
+        if path.exists() and path.read_text() == encoded:
+            print(str(path) + ': already installed')
+            continue
+        backup.mkdir(parents=True, exist_ok=True, mode=0o700)
+        if path.exists():
+            shutil.copy2(path, backup / (provider + '-' + filename))
+        path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+        fd, temporary = tempfile.mkstemp(dir=path.parent)
+        try:
+            with os.fdopen(fd, 'w') as stream:
+                stream.write(encoded)
+            os.replace(temporary, path)
+        finally:
+            if os.path.exists(temporary):
+                os.unlink(temporary)
+        print(str(path) + ': installed; backup directory ' + str(backup))
+    print('Codex: review and trust the two exact definitions in /hooks. Claude: start a fresh session. Verify native invocation before claiming enforcement.')
+
+
+if __name__ == '__main__':
+    main()

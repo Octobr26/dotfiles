@@ -1,0 +1,169 @@
+#!/usr/bin/env python3
+"""Native hook guardrail for explicitly enrolled readiness sessions, not an OS boundary."""
+import argparse
+import hashlib
+import json
+import os
+from pathlib import Path
+import re
+import shlex
+import subprocess
+import sys
+
+CLI = Path(__file__).resolve().with_name('agent-readiness')
+MAX_JSON_BYTES = 2 * 1024 * 1024
+EDIT_TOOLS = frozenset(('Write', 'Edit', 'apply_patch'))
+
+
+def read_json(path):
+    if path.is_symlink() or path.stat().st_size > MAX_JSON_BYTES:
+        raise ValueError('Readiness record must be a bounded regular JSON file.')
+    value = json.loads(path.read_text())
+    if not isinstance(value, dict):
+        raise ValueError('Readiness record must be a JSON object.')
+    return value
+
+
+def enrollment(payload, state_dir):
+    targets = action_targets(payload, state_dir)
+    if not targets:
+        return None
+    index = state_dir / 'sessions' / (hashlib.sha256(payload['session_id'].encode()).hexdigest() + '.json')
+    if not index.exists():
+        return None
+    binding = read_json(index)
+    if binding.get('version') != 1 or binding.get('actor') != payload['session_id'] or not isinstance(binding.get('records'), dict):
+        raise ValueError('Readiness session index is malformed.')
+    matched = []
+    for repository, filename in binding['records'].items():
+        if not Path(repository).is_absolute() or not isinstance(filename, str) or not Path(filename).is_absolute():
+            raise ValueError('Readiness session index needs absolute repository and record paths.')
+        if any(target.is_relative_to(Path(repository).resolve()) for target in targets):
+            path = Path(filename)
+            record = read_json(path)
+            if record.get('actor') != payload['session_id'] or record.get('repository') != repository:
+                raise ValueError('Readiness record does not match native session enrollment.')
+            matched.append((path, record))
+    if len(matched) > 1:
+        raise ValueError('This tool targets multiple repositories; split it into separately enrolled operations.')
+    if matched and not all(target.is_relative_to(Path(matched[0][1]['repository']).resolve()) for target in targets):
+        raise ValueError('This tool targets multiple repositories; one accepted record cannot authorize all files.')
+    return matched[0] if matched else None
+
+
+def edit_paths(payload):
+    arguments = payload.get('tool_input', {})
+    cwd = Path(payload['cwd'])
+    if payload.get('tool_name') == 'apply_patch':
+        patch = arguments if isinstance(arguments, str) else arguments.get('command', '') if isinstance(arguments, dict) else ''
+        if not isinstance(patch, str):
+            return []
+        filenames = re.findall(r'^\*\*\* (?:Add File|Update File|Delete File|Move to): (.+)$', patch, re.MULTILINE)
+        return [(cwd / filename).resolve() for filename in filenames]
+    if isinstance(arguments, dict):
+        filename = arguments.get('file_path')
+        if payload.get('tool_name') in ('Write', 'Edit') and isinstance(filename, str):
+            return [(cwd / filename).resolve()]
+    return []
+
+
+def action_targets(payload, state_dir):
+    paths = edit_paths(payload) if payload['hook_event_name'] == 'PreToolUse' else []
+    if paths:
+        private_roots = (state_dir.resolve(), (state_dir.parent / 'experiments').resolve())
+        return [path for path in paths if not any(path.is_relative_to(root) for root in private_roots)]
+    return [Path(payload['cwd']).resolve()]
+
+
+def repository_for(target):
+    """Locate the actual checkout, including worktrees with a .git file."""
+    for candidate in (target, *target.parents):
+        if (candidate / '.git').exists():
+            return candidate
+    return None
+
+
+def verify(path, phase):
+    result = subprocess.run([sys.executable, str(CLI), 'check', '--record', str(path), '--phase', phase],
+                            text=True, capture_output=True, timeout=25, shell=False)
+    return result.returncode == 0, (result.stdout + result.stderr)[-3000:]
+
+
+def deny(reason):
+    print('Readiness gate: ' + reason, file=sys.stderr)
+    return 2
+
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument('--state-dir', type=Path,
+                        default=Path(os.environ.get('AGENT_READINESS_STATE_DIR',
+                                                   Path.home() / '.local/state/agent-workflow/readiness')))
+    parser.add_argument('--require-for', type=Path, action='append', default=[])
+    args = parser.parse_args()
+    raw = sys.stdin.read(MAX_JSON_BYTES + 1)
+    if len(raw) > MAX_JSON_BYTES:
+        raise ValueError('Native hook input is too large.')
+    payload = json.loads(raw)
+    if not isinstance(payload, dict):
+        raise ValueError('Native hook input must be an object.')
+    for key in ('session_id', 'cwd', 'hook_event_name'):
+        if not isinstance(payload.get(key), str) or not payload[key]:
+            raise ValueError('Native hook input needs ' + key + '.')
+    if not Path(payload['cwd']).is_absolute():
+        raise ValueError('Native hook cwd must be absolute.')
+    event = payload['hook_event_name']
+    if event not in ('PreToolUse', 'Stop'):
+        raise ValueError('Unsupported native hook event: ' + event)
+    if event == 'PreToolUse' and (not isinstance(payload.get('tool_name'), str) or 'tool_input' not in payload):
+        raise ValueError('PreToolUse needs tool_name and tool_input.')
+    # Only explicit file edits carry a reliable mutation target. Shells, MCP,
+    # clarification and coordination retain the provider's normal permissions.
+    # An incomplete or stale record must not prevent gathering its evidence.
+    if event == 'PreToolUse' and payload['tool_name'] not in EDIT_TOOLS:
+        return 0
+    try:
+        enrolled = enrollment(payload, args.state_dir)
+    except (OSError, ValueError, KeyError, TypeError) as error:
+        if event != 'Stop':
+            raise
+        print(json.dumps({'systemMessage': 'Readiness could not be checked; no acceptance is implied. ' + str(error)}))
+        return 0
+    if not enrolled:
+        if event == 'Stop':
+            return 0
+        targets = action_targets(payload, args.state_dir)
+        required = [root.resolve() for root in args.require_for
+                    if any(target.is_relative_to(root.resolve()) for target in targets)]
+        if required:
+            location = repository_for(targets[0])
+            if location is None:
+                return deny('file edit is inside a protected root but no Git repository was found for '
+                            + str(targets[0]) + '. Select the actual task repository before editing.')
+            command = shlex.join([str(CLI), 'init', '--repo', str(location), '--base', 'HEAD',
+                                  '--mode', 'implementation', '--actor', payload['session_id'], '--task', 'Describe the task'])
+            return deny('repository file edit requires enrollment and an accepted plan. Start with: ' + command)
+        return 0
+    path, record = enrolled
+    if event == 'PreToolUse':
+        if record.get('mode') == 'review' and payload['tool_name'] in ('Write', 'Edit', 'apply_patch'):
+            return deny('a review record does not authorize repository file edits; enroll an implementation task.')
+        passed, diagnostic = verify(path, 'implementation')
+        return 0 if passed else deny('accepted plan required before this tool. ' + diagnostic)
+    # Ending a response is not a readiness claim: investigations and questions
+    # must be able to finish. Explicit final checks still decide readiness.
+    try:
+        passed, diagnostic = verify(path, 'final')
+    except (OSError, subprocess.SubprocessError) as error:
+        passed, diagnostic = False, str(error)
+    if not passed:
+        print(json.dumps({'systemMessage': 'Readiness remains incomplete; no acceptance is implied. ' + diagnostic}))
+    return 0
+
+
+
+if __name__ == '__main__':
+    try:
+        sys.exit(main())
+    except (OSError, ValueError, KeyError, TypeError, subprocess.SubprocessError) as error:
+        sys.exit(deny(str(error)))
