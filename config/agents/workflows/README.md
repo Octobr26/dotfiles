@@ -8,6 +8,12 @@ The execution location does not change the required evidence, ownership, or veri
 
 1. Identify the target system: repository, document set, account, service, or runtime.
 2. Read its nearest instructions and inspect current state before proposing or editing.
+   For planning, implementation or writing implementation prompts, check `~/.config/agent-context/<repository>/review-patterns.md` when present.
+   Carry only applicable, source-backed preferences and counterexamples into the task packet: name the existing helper or owner, the behavior to preserve, and its focused verification.
+   Before the first code edit, the implementer checks those selections against current code; if the handoff omitted them, select the relevant patterns rather than waiting for review.
+   Apply them as each slice is written: reuse the identified owner, preserve the established contract, and exercise the selected counterexample at the existing verification seam.
+   Before reviewer handoff, check the implementation against those selections and attach the actual verification or a source-backed explanation of any material deviation to the same task packet.
+   Current project rules and Luis's decisions take precedence; reviewer preferences do not turn optional cleanup into a requirement or transfer language-specific conventions to another repository.
 3. State the objective, acceptance criteria, out-of-scope boundary, and risk.
 4. Select the smallest route below.
 
@@ -89,11 +95,14 @@ A material unknown is one whose answer can change acceptance, user-visible behav
   Give it the exact question, relevant path, evidence needed, and a stop condition, using the task packet and `model-routing.md`.
   Inspect its cited evidence; a subagent's conclusion alone does not settle the question.
 - For an unresolved product or policy choice, ask Luis with the concrete alternatives, recommended option, consequence, and exact decision needed.
-  Investigate facts that constrain the choice, but let Luis choose the intended behavior.
+  Compare the original request, recorded decisions and current requirements before treating a reviewer suggestion, existing test or implementation plan as authority.
+  When these sources permit conflicting user-visible outcomes, pause dependent code and policy-setting assertions until Luis settles the choice; continue independent, settled work.
 - When evidence is unavailable or conflicting after a focused investigation, report what was checked and ask Luis for the missing information or decision.
   Pause only the dependent work and continue independent work within scope.
 
 An unknown is resolved by sufficient evidence or an explicit user decision, not by being labeled an assumption, copied into a prompt, or covered by a test.
+Carry the settled choice and its expected consequences into the plan and finding dispositions; an incompatible reviewer proposal needs a sourced disposition, and any additional correction needs a demonstrated requirement violation.
+For work covered by [readiness](readiness.md), record this assessment and the quoted authority before its plan check; a pending question remains a decision finding until resolved.
 For routine implementation details whose alternatives preserve the established behavior, choose the smallest reversible option that fits local patterns.
 
 ## Trace the affected behavior

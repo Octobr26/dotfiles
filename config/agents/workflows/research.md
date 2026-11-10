@@ -65,6 +65,36 @@ Finish a bounded investigation with those limits if evidence is unavailable; com
 Scale the handoff to the task and reuse an existing report or task packet; a new document, agent, or approval round is not required by this contract.
 Keep persistent personal investigation reports outside project repositories unless Luis requests project documentation.
 
+### Cross-repository behavior plan
+
+Before implementing coupled producer/consumer behavior across repositories or independent deployments, complete this contract in the existing plan or handoff.
+Use it for the whole requested outcome even when Luis authorizes only an initial draft slice; it describes the destination and dependencies, not permission to edit every repository.
+For each acceptance outcome, record:
+
+- **Behavior and ownership:** the real entry point, producer and consumer at inspected revisions, intended result, and owning implementation slice.
+  Cite the requirement or decision for the intended result; identify proposed contract changes separately from current behavior.
+  Settle eligibility versus contextual matching, identity and self-filter semantics where they affect the outcome.
+- **Interface and lifetime:** the planned request/response and each resource's owner, compared with the target repository's canonical implementations.
+  Explain what depends on organization, dates or selections, how callers cache and invalidate it, and the resulting request frequency and serialized payload bound.
+  Include both unrestricted and narrowed scopes when a caller turns a result list into request parameters.
+- **State and verification:** concrete input → expected result examples that distinguish plausible wrong implementations, plus a valid control.
+  For joined requests, settle which successful data permits initialization, either response arriving or failing first, and retry/re-entry behavior before choosing assertions.
+  Name the production boundary each local test or source check can establish, and the remaining integration check.
+- **Delivery:** the compatible intermediate versions, deployment order, and what each draft slice delivers or leaves to a named owner/slice.
+  Every acceptance outcome needs a planned path or an explicit unresolved decision; “follow-up” alone does not account for missing required behavior.
+
+Apply the existing risk-2-or-higher plan challenge for contract behavior under [Risk and Review Budget](README.md#risk-and-review-budget).
+The existing Skeptic checks the original request, canonical project patterns and examples before dependent implementation; reuse that stage rather than adding another reviewer.
+A topic such as “verify recovery” is not a settled behavior, and mapping unrelated checks to every coverage category does not establish acceptance coverage.
+Record the challenged decisions and their dispositions in the same plan.
+
+A slice is implementation-ready when its acceptance-changing choices and interfaces are settled by evidence or authorized decisions, and its examples cover its actual callers and dependencies.
+Keep unresolved independent slices pending while proceeding with authorized, settled work; a draft label does not make a dependent unknown safe to implement.
+An undeployed companion backend is a verification constraint, not by itself a design blocker.
+Use local producer/serializer checks, consumer contract checks and permitted synthetic UI tests against the same agreed examples before deployment; label their evidence accurately and retain actual integration as pending.
+Passing mocks cannot settle an unresolved producer contract.
+Report slice readiness separately from whole-ticket acceptance, retaining the remaining outcomes, owners and deployment checks.
+
 ## Research Stop Conditions
 
 Stop collecting when the decision question is answered by sufficient authoritative evidence, a source conflict requires escalation, or the remaining uncertainty cannot change the decision.

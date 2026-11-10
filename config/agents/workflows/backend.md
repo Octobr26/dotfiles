@@ -10,10 +10,20 @@ Frontend-only work keeps its own scenario selection; this guide applies to the b
 
 1. Locate the actual caller, behavior owner, schema/writer and affected consumers at the task revisions.
    Read project instructions and shared product context; a historical review example is a lead to verify, not a current defect or a new requirement.
-2. Select applicable cases below before choosing assertions, using the [clarification gate](README.md#clarification-gate) for unresolved behavior or ownership.
+2. Before adding or reshaping an endpoint, name the resource its rows are and look for an existing endpoint for that resource.
+   If one exists, add the missing filters to it; give the data its own route only when no endpoint for that resource exists.
+   Shape the API around the data, not around what one page needs: a page-specific route for rows that already have an endpoint is too many routes, and one endpoint shared by several resources is too few.
+   When a list or drilldown sits behind an aggregate or chart, find where each of them decides which rows count (statuses, classification, date and team scope), share that rule instead of copying it, and compare the list rows with the aggregate for the same filters.
+   Record the existing endpoints considered and why each did or did not fit; the pull request body carries one line naming them whenever the change adds or alters an endpoint.
+3. Plan before the first edit.
+   Write a short plan in the task record and show it to Luis; edit code only after he accepts it.
+   It names the resource and the existing endpoints considered, the owner files and reference implementation the change follows, each applicable pattern from `~/.config/agent-context/<repository>/review-patterns.md` (or states the file is absent), the cases selected below, and the verification.
+   Where the notes are missing or older than the reviewer's latest comments, run `scripts/review-sync --repo OWNER/REPO --reviewer LOGIN --author LOGIN` and read what it lists first.
+   A change with no pattern matches says so; it does not skip the step.
+4. Select applicable cases below before choosing assertions, using the [clarification gate](README.md#clarification-gate) for unresolved behavior or ownership.
    Put the required result, authority, discriminating input/interleaving, production boundary and verification path in the existing plan/evidence record.
    With the [readiness pilot](readiness.md), map these cases to its existing applicability dimensions; UI-only scenarios can be n/a with the actual diff reason.
-3. Exercise the selected cases during implementation and reassess them against the final revision during review.
+5. Exercise the selected cases during implementation and reassess them against the final revision during review.
    Keep accepted follow-ups, release prerequisites and unresolved product decisions distinct under the [review workflow](review.md#behavior-evidence-before-a-verdict).
 
 ## Backend cases

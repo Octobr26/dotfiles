@@ -13,6 +13,7 @@
    Use [domain-modeling](../../skills/domain-modeling/SKILL.md) when terminology or ownership ambiguity changes the requirement.
    Use [codebase-design](../../skills/codebase-design/SKILL.md) only when an interface or architecture decision is part of the change.
 4. Analyst writes the smallest implementation plan, its side effects, and how to check the observable behavior and edge cases.
+   For coupled behavior across repositories or independent deployments, complete the [cross-repository behavior plan](research.md#cross-repository-behavior-plan) before dependent implementation, including when starting with an authorized draft slice.
    Separate user/project requirements, verified current behavior, and agent-proposed decisions; cite the source of each consequential choice.
    Apply this distinction to generated prompts and handoffs too: a proposed decision does not become a confirmed requirement through repetition.
    For changes on a request path, name essential versus optional results and explain failure behavior, added latency, and bounded work using the current implementation as evidence.
@@ -36,6 +37,7 @@
    Check consequential agent-proposed decisions against the original request, including failure propagation and completeness-versus-availability tradeoffs; tests that pin a proposal do not establish that it is the right policy.
 7. Implementer makes the authorized change under [scope and authority](README.md#scope-and-authority). When test-first work was planned,
    make the focused test pass with the smallest change before refactoring.
+   Apply the [selected review patterns](README.md#start) before editing and throughout the implementation, including when the supplied plan omitted them.
    Follow [tdd](../../skills/tdd/SKILL.md) for each planned test-first slice and inspect its result before starting the next.
    Exercise the selected counterexamples as each slice is built, including the other affected consumers of a shared rule; keep synthetic inputs faithful to the producer's possible responses.
    If implementation reveals a wrong assumption, revisit the expected behavior and affected consumers before adapting assertions; preserve the reported failure as an open finding until evidence closes it.
@@ -48,5 +50,3 @@
 9. Reviewer checks the final result against acceptance criteria, raw verification, and surrounding impact before seeing the Implementer's defense.
    Apply the [finding gate](review.md#finding-gate) and [concise output rules](review.md#concise-review-output), preserving their distinction between unsupported preferences and concrete non-blocking findings.
 10. Adjudicator closes any material review finding under `challenge.md`.
-
-For a cross-project change, freeze the shared interface or decision before independent implementation begins.

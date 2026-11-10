@@ -1,41 +1,40 @@
-# Current Model Evidence
+# Model evidence
 
-Checked against first-party documentation on 2026-08-19.
-This file is a refreshable snapshot; `model-routing.md` contains the operating policy.
+OpenAI guidance checked on 2026-11-03.
+This is supporting evidence; [model-routing.md](model-routing.md) owns the operating policy and explicit model/effort choices.
 
-## Current Models and Price Anchors
+## OpenAI
 
-Prices are first-party API list prices per million input/output tokens.
-They are useful for relative routing decisions; Claude subscription quotas and third-party provider billing can differ.
+| Model | Documented fit |
+| --- | --- |
+| `gpt-6.1-sol` | Complex coding and professional work with a balance of capability, time and cost. |
+| `gpt-6-astra` | Demanding reasoning, ambiguous problems and deep analysis. |
+| `gpt-6.1-terra` | Scoped code fixes, visual reasoning and computer use with clear inputs and verification. |
+| `gpt-6-luna` | Focused, cost-sensitive workloads and bounded collection. |
 
-| Provider | Current model | Documented purpose | Supported effort | Input / output |
-| --- | --- | --- | --- | --- |
-| OpenAI | `gpt-5.6-luna` | Cost-sensitive, high-volume workloads. | `none`, `low`, `medium`, `high`, `xhigh`, `max` | $0.20 / $1.20 |
-| OpenAI | `gpt-5.6-terra` | Balance intelligence and cost. | `none`, `low`, `medium`, `high`, `xhigh`, `max` | $2 / $12 |
-| OpenAI | `gpt-5.6-sol` | Frontier complex professional reasoning and coding. | `none`, `low`, `medium`, `high`, `xhigh`, `max` | $5 / $30 |
-| Anthropic | Claude Haiku 4.5 | Fastest model for simple, efficient work. | Claude Code effort is unsupported. | $1 / $5 |
-| Anthropic | Claude Sonnet 5 | Best combination of speed and intelligence; daily coding. | `low`, `medium`, `high`, `xhigh`, `max` | $2 / $10 |
-| Anthropic | Claude Opus 5 | Complex agentic coding and reasoning. | `low`, `medium`, `high`, `xhigh`, `max` | $5 / $25 |
-| Anthropic | Claude Fable 5 | Highest capability for long-running agents and work larger than one sitting. | `low`, `medium`, `high`, `xhigh`, `max` | $10 / $50 |
+GPT-6.1 Sol supports explicit `high` effort and native tool use; a custom API integration must use Responses for tool calling.
+The 2026-11-03 harness update adopts Sol for substantive Codex work in response to Luis's request to use GPT-6.1 Sol and improve the harness.
+Choosing high effort is a local quality preference, not a measured guarantee of fewer escaped defects.
+Compare model outputs on fixed representative tasks and acceptance criteria before optimizing cost; count review and repair time.
 
-## Evidence-Based Defaults
+Model availability differs across APIs, local catalogs and agent-spawn interfaces.
+Verify the execution surface and read back the effective model; an older model listed in a catalog is not automatically unavailable or a valid fallback for another interface.
 
-- OpenAI documents Terra as the cost/intelligence balance and Luna as the cost-sensitive tier; the workflow therefore uses Luna only for bounded evidence and Terra for normal judgment.
-- OpenAI recommends `medium` as a balanced start and reserving higher levels for measured quality gains; Luis' manual escalation ceiling is `high`, and the workflow never selects `xhigh`, `max`, or Ultra automatically.
-- Anthropic describes Haiku as fast and efficient for simple tasks, Sonnet as daily coding, Opus as complex reasoning, and Fable as hardest and longest-running work.
-- Anthropic does not list Haiku 4.5 among models supporting effort, so the Haiku collector deliberately omits `effort`.
-- Anthropic states that effort changes reasoning volume rather than imposing a hard token ceiling; each workflow stage therefore also needs a stop condition and delegation budget.
-- Claude `ultracode` and `xhigh` are not workflow defaults because Luis has not seen enough benefit to justify their token cost; explicit High escalation uses Opus at `high`.
-- The provider descriptions do not prescribe these exact agent roles. The routing table is an inference that must be evaluated on Luis' representative tasks.
+## Claude and pricing
 
-## Primary Sources
+The Claude route uses portable family aliases in the installed agent definitions.
+Read back the effective version because aliases and provider availability can change.
+This OpenAI routing update does not change Claude's role definitions or defaults.
+Check current provider pricing for cost comparisons instead of using a historical table as a current quote.
+The metrics pricing registry and historical evaluation profiles are separate from executor routing.
 
+## Primary sources
+
+- [GPT-6.1 Sol capabilities and effort](https://developers.openai.com/api/docs/models/gpt-6.1-sol)
+- [OpenAI model selection and comparison guidance](https://developers.openai.com/api/docs/guides/model-selection)
 - [OpenAI model catalog](https://developers.openai.com/api/docs/models)
-- [OpenAI GPT-5.6 model and effort guidance](https://developers.openai.com/api/docs/guides/latest-model)
-- [Claude Code model aliases and effort support](https://code.claude.com/docs/en/model-config)
-- [Claude Code custom subagent configuration](https://code.claude.com/docs/en/sub-agents)
-- [Anthropic current model comparison](https://platform.claude.com/docs/en/about-claude/models/overview)
-- [Anthropic effort guidance](https://platform.claude.com/docs/en/build-with-claude/effort)
+- [Claude Code aliases and effort](https://code.claude.com/docs/en/model-config)
+- [Claude Code subagent configuration](https://code.claude.com/docs/en/sub-agents)
 - [Anthropic pricing](https://platform.claude.com/docs/en/about-claude/pricing)
 
-Refresh this snapshot when a provider changes a model alias or price, a selected model is unavailable, or the routing evaluation shows a quality or cost regression.
+Refresh the relevant evidence when a selected model is unavailable or a representative evaluation shows a quality or cost regression.

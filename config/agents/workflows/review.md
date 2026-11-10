@@ -3,7 +3,7 @@
 Reviews are read-only unless Luis separately asks to address findings.
 When review accompanies an editing task, apply [scope and authority](README.md#scope-and-authority) to each correction; verification does not expand the authorized diff.
 Project instructions and current code remain authoritative; these are Luis' personal review defaults.
-For behavior-changing PR reviews with an existing executable test seam, use the [behavior evidence pilot](readiness.md): check the sourced plan before reviewer dispatch and final evidence before recommending approval.
+For behavior-changing PR reviews with an existing executable test seam, use the [behavior evidence pilot](readiness.md): check the sourced plan before final-review dispatch and final evidence before recommending approval.
 The existing reviewers supply the independent assessments; an incomplete gate remains a coverage limit, not a new recursive review stage.
 
 ## Review the exact change
