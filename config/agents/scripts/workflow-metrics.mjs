@@ -982,6 +982,10 @@ async function parseRollout(file) {
       continue;
     }
     if (record.type === "event_msg") {
+      if (payload.type === "turn_aborted" && payload.reason === "interrupted") {
+        result.events.push({ kind: "interrupt", timestampMs, turnId: payload.root_turn_id ?? payload.turn_id });
+        continue;
+      }
       if (payload.type === "task_started" || payload.type === "task_complete") {
         activeTurnId = payload.turn_id ?? activeTurnId;
         result.events.push({
@@ -1089,6 +1093,9 @@ async function parseClaudeTranscript(file) {
       }
       if (Array.isArray(content)) {
         for (const block of content) {
+          if (block?.type === "text" && typeof block.text === "string" && block.text.startsWith("[Request interrupted by user")) {
+            result.events.push({ kind: "interrupt", timestampMs, promptId: record.promptId ?? activePromptId, cwd });
+          }
           if (block?.type !== "tool_result") continue;
           result.events.push({
             kind: "tool_result",
@@ -1096,6 +1103,7 @@ async function parseClaudeTranscript(file) {
             promptId: record.promptId ?? activePromptId,
             toolUseId: block.tool_use_id ?? null,
             failed: block.is_error === true,
+            exitCode: block.is_error === true ? claudeFailureExitCode(block.content) : null,
             cwd
           });
         }
@@ -1109,6 +1117,7 @@ async function parseClaudeTranscript(file) {
         promptId: activePromptId,
         messageId: record.message?.id ?? null,
         model: record.message?.model ?? null,
+        effort: [record.perTurnEffort, record.effort].find((value) => typeof value === "string" && /^[a-z]{1,16}$/.test(value)) ?? null,
         usage: record.message?.usage ?? null,
         content: Array.isArray(record.message?.content) ? record.message.content : [],
         cwd
@@ -1137,15 +1146,29 @@ function initializeClaudeTracking(task) {
   task._claudeObservedSubagents ??= new Set();
 }
 
+// Failed Claude Bash results start with "Exit code N"; other failures carry no code.
+function claudeFailureExitCode(content) {
+  const text = typeof content === "string"
+    ? content
+    : Array.isArray(content) ? content.find((part) => typeof part?.text === "string")?.text : null;
+  const match = /^Exit code (\d+)/.exec(text ?? "");
+  return match ? Number(match[1]) : null;
+}
+
 function applyClaudeEvent(task, event, agentKey = null) {
   initializeClaudeTracking(task);
   const agentPrefix = agentKey ?? "root";
   if (agentKey) task._claudeObservedSubagents.add(agentKey);
+  if (event.kind === "interrupt") {
+    if (!agentKey) task.interruptions += 1;
+    return;
+  }
   if (event.kind === "assistant") {
     if (agentKey) {
       if (event.model) task.delegatedModels.add(event.model);
     } else {
       task.model ??= event.model;
+      task.reasoningEffort ??= event.effort;
       if (event.model) task.modelSource = "claude-assistant-message";
       if (task.timeToFirstTokenMs === null && Number.isFinite(event.timestampMs)) {
         task.timeToFirstTokenMs = Math.max(0, event.timestampMs - task.startedAtMs);
@@ -1193,8 +1216,11 @@ function applyClaudeEvent(task, event, agentKey = null) {
   if (event.kind === "tool_result" && event.failed) {
     task.toolFailures += 1;
     const toolKey = `${agentPrefix}:${event.toolUseId}`;
-    if (task._claudeToolNames.get(toolKey) === "Bash") {
-      task.commandFailureExitCodes.set("unknown", (task.commandFailureExitCodes.get("unknown") ?? 0) + 1);
+    const toolName = task._claudeToolNames.get(toolKey) ?? "unknown";
+    task.toolFailuresByName.set(toolName, (task.toolFailuresByName.get(toolName) ?? 0) + 1);
+    if (toolName === "Bash") {
+      const bucket = event.exitCode === null || event.exitCode === undefined ? "unknown" : String(event.exitCode);
+      task.commandFailureExitCodes.set(bucket, (task.commandFailureExitCodes.get(bucket) ?? 0) + 1);
     }
   }
 }
@@ -1287,6 +1313,8 @@ function newTask(sessionId, turnId, provider = "codex") {
     commandCalls: 0,
     toolFailures: 0,
     commandFailureExitCodes: new Map(),
+    toolFailuresByName: new Map(),
+    interruptions: 0,
     specialistAgents: new Set(),
     fullHistorySpawns: 0,
     boundedHistorySpawns: 0,
@@ -1308,6 +1336,7 @@ function nearestTask(tasks, timestampMs) {
 }
 
 function applyEvent(task, event, agentPath) {
+  if (event.kind === "interrupt") task.interruptions += 1;
   if (event.kind === "context" && event.model) {
     if (agentPath === "/root") {
       task.model = event.model;
@@ -2869,6 +2898,7 @@ async function summary(options) {
     tasks: tasks.map((task) => ({
       ...task,
       commandFailureExitCodes: [...task.commandFailureExitCodes.entries()],
+      toolFailuresByName: [...task.toolFailuresByName.entries()],
       specialistAgents: [...task.specialistAgents],
       delegatedModels: [...task.delegatedModels],
       requestedDelegateRoutes: [...task.requestedDelegateRoutes],

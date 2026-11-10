@@ -128,6 +128,35 @@ test("Claude inference requires the original root prompt, not merely a timestamp
   assert.equal(complete.runs[0].inferredFeedback.rating, 5);
 });
 
+test("Claude transcripts expose failure exit codes, failures by tool, effort and interrupts", () => {
+  const root = createWorkspace(); const session = "claude-failures"; const now = Date.now();
+  const at = (minutes) => new Date(now - minutes * 60_000).toISOString();
+  mkdirSync(path.join(root, "sessions"));
+  const base = { sessionId: session, promptId: "one", cwd: root };
+  const toolUse = (id, name) => ({ type: "assistant", ...base, timestamp: at(9), perTurnEffort: "high",
+    message: { id: `m-${id}`, model: "claude-opus-5-5", content: [{ type: "tool_use", id, name, input: {} }],
+      usage: { input_tokens: 1, output_tokens: 1 } } });
+  const failure = (id, content) => ({ type: "user", ...base, timestamp: at(8),
+    message: { content: [{ type: "tool_result", tool_use_id: id, is_error: true, content }] } });
+  const rows = [
+    { type: "user", ...base, parentUuid: null, timestamp: at(10), message: { content: "Scoped work" } },
+    toolUse("t1", "Bash"), failure("t1", "Exit code 2\nsearch failed"),
+    toolUse("t2", "Bash"), failure("t2", [{ type: "text", text: "no exit code here" }]),
+    toolUse("t3", "Edit"), failure("t3", "String not found"),
+    { type: "user", ...base, timestamp: at(7), message: { content: [{ type: "text", text: "[Request interrupted by user]" }] } },
+    { type: "system", subtype: "turn_duration", sessionId: session, timestamp: at(6) }
+  ];
+  write(root, `claude-sessions/${session}.jsonl`, rows.map(JSON.stringify).join("\n") + "\n");
+  const report = JSON.parse(run(root, ["summary", "--format", "json", "--days", "2", "--sessions", path.join(root, "sessions"),
+    "--claude-sessions", path.join(root, "claude-sessions")]).stdout);
+  const task = report.tasks.find((item) => item.provider === "claude");
+  assert.equal(task.toolFailures, 3);
+  assert.deepEqual(Object.fromEntries(task.commandFailureExitCodes), { 2: 1, unknown: 1 });
+  assert.deepEqual(Object.fromEntries(task.toolFailuresByName), { Bash: 2, Edit: 1 });
+  assert.equal(task.reasoningEffort, "high");
+  assert.equal(task.interruptions, 1);
+});
+
 function write(root, relative, contents = "test\n") {
   const target = path.join(root, relative);
   mkdirSync(path.dirname(target), { recursive: true });
