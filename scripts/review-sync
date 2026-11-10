@@ -1,0 +1,78 @@
+#!/usr/bin/env python3
+"""List a reviewer's comments on your PRs that a review-patterns.md note does not yet cite.
+
+Read-only: fetches through `gh api` and prints; it never edits the notes.
+Usage: review-sync --repo OWNER/REPO --reviewer LOGIN [--author LOGIN] [--notes PATH]
+"""
+import argparse
+import json
+import re
+import subprocess
+import sys
+from pathlib import Path
+
+CONTEXT_DIR = Path.home() / '.config' / 'agent-context'
+
+
+def cited_pr_numbers(notes_text, repo):
+    pattern = rf'github\.com/{re.escape(repo)}/pull/(\d+)'
+    return {int(n) for n in re.findall(pattern, notes_text)}
+
+
+def unseen(prs, cited):
+    return [pr for pr in prs if pr['number'] not in cited]
+
+
+def reviewer_comments(inline, reviews, reviewer):
+    rows = []
+    for c in inline:
+        if c.get('user', {}).get('login') == reviewer:
+            rows.append((c.get('path', ''), c.get('html_url', ''), c.get('body', '')))
+    for r in reviews:
+        if r.get('user', {}).get('login') == reviewer and (r.get('body') or '').strip():
+            rows.append((f"review ({r.get('state', '')})", r.get('html_url', ''), r['body']))
+    return rows
+
+
+def gh(path):
+    out = subprocess.run(['gh', 'api', '--paginate', path], capture_output=True, text=True)
+    if out.returncode:
+        sys.exit(f'gh api {path} failed: {out.stderr.strip()}')
+    text = out.stdout.strip()
+    # --paginate concatenates JSON arrays as `][`.
+    return json.loads(text.replace('][', ',')) if text else []
+
+
+def search_prs(repo, reviewer, author):
+    query = f'repo:{repo}+type:pr+reviewed-by:{reviewer}' + (f'+author:{author}' if author else '')
+    out = subprocess.run(['gh', 'api', f'search/issues?q={query}&per_page=100'],
+                         capture_output=True, text=True)
+    if out.returncode:
+        sys.exit(f'search failed: {out.stderr.strip()}')
+    return json.loads(out.stdout)['items']
+
+
+def main():
+    ap = argparse.ArgumentParser(description=__doc__)
+    ap.add_argument('--repo', required=True)
+    ap.add_argument('--reviewer', required=True)
+    ap.add_argument('--author')
+    ap.add_argument('--notes', help='default: ~/.config/agent-context/<repo name>/review-patterns.md')
+    args = ap.parse_args()
+    notes = Path(args.notes) if args.notes else CONTEXT_DIR / args.repo.split('/')[-1] / 'review-patterns.md'
+    text = notes.read_text() if notes.exists() else ''
+    new = unseen(search_prs(args.repo, args.reviewer, args.author), cited_pr_numbers(text, args.repo))
+    if not new:
+        print(f'No uncited PRs reviewed by {args.reviewer}; {notes} is current.')
+        return
+    for pr in sorted(new, key=lambda p: p['number']):
+        n = pr['number']
+        rows = reviewer_comments(gh(f'repos/{args.repo}/pulls/{n}/comments'),
+                                 gh(f'repos/{args.repo}/pulls/{n}/reviews'), args.reviewer)
+        print(f"## #{n} {pr['title']} ({pr['state']})\n{pr['html_url']}\n")
+        for where, url, body in rows:
+            print(f'- {where} {url}\n  ' + body.strip().replace('\n', '\n  ') + '\n')
+
+
+if __name__ == '__main__':
+    main()
