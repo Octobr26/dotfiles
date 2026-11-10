@@ -6,6 +6,19 @@ RATE_FILE = Path(__file__).resolve().parents[1] / 'usage-pricing.json'
 RATES = json.loads(RATE_FILE.read_text())
 
 
+def select_rates(rates, tokens):
+    """Return flat per-token rates, applying a prompt-length tier when the model defines one."""
+    tier = rates.get('long_context')
+    base = {key: value for key, value in rates.items() if key != 'long_context'}
+    if not tier:
+        return base, False
+    # Prompt length counts every input token, including cache reads and writes.
+    prompt = sum(tokens.get(key, 0) for key in ('input', 'read', 'write5m', 'write1h'))
+    if prompt > tier['threshold']:
+        return {**base, **{key: value for key, value in tier.items() if key != 'threshold'}}, True
+    return base, False
+
+
 def estimate(record):
     """Price one request; reasoning is already included in output."""
     rates = RATES['models'].get(record.get('model'))
@@ -45,6 +58,9 @@ def estimate(record):
             assumptions.append('global-rate-geography-unavailable')
         elif geo != 'global':
             return {'status': 'unpriced', 'reason': 'unsupported-geography'}
+        rates, long_prompt = select_rates(rates, tokens)
+        if long_prompt:
+            assumptions.append('long-prompt-tier')
         value = sum(tokens.get(k, 0) * rate for k, rate in rates.items())
     return {'status': 'priced', 'usd': value * multiplier / 1000000,
             'rate_version': RATES['verified_at'], 'assumptions': assumptions}

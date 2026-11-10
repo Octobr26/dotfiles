@@ -1,5 +1,5 @@
 {
-  "verified_at": "2026-10-06",
+  "verified_at": "2026-11-09",
   "unit": "USD per million tokens",
   "basis": "current standard API reference rates; not historical billing",
   "sources": [
@@ -51,7 +51,7 @@
       "output": 10,
       "write5m": 2.5,
       "write1h": 4,
-      "read": 0.2
+      "read": 0.1
     },
     "claude-haiku-4-5-20251001": {
       "input": 1,
@@ -59,6 +59,33 @@
       "write5m": 1.25,
       "write1h": 2,
       "read": 0.1
+    },
+    "gpt-6.1-terra": {
+      "input": 1,
+      "read": 0.05,
+      "write": 1.25,
+      "output": 5
+    },
+    "gpt-5.6-terra": {
+      "input": 2,
+      "read": 0.2,
+      "write": 2.5,
+      "output": 12
+    },
+    "claude-haiku-5-5": {
+      "input": 0.1,
+      "output": 0.5,
+      "write5m": 0.125,
+      "write1h": 0.2,
+      "read": 0.01,
+      "long_context": {
+        "threshold": 100000,
+        "input": 0.5,
+        "output": 2.5,
+        "write5m": 0.625,
+        "write1h": 1,
+        "read": 0.05
+      }
     }
   }
 }
