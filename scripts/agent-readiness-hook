@@ -16,7 +16,8 @@ EDIT_TOOLS = frozenset(('Write', 'Edit', 'apply_patch'))
 # Shell tools get a bounded check for known direct edit forms only; see readiness.md.
 SHELL_TOOLS = frozenset(('Bash', 'exec_command'))
 PATCH_FILES = re.compile(r'^\*\*\* (?:Add File|Update File|Delete File|Move to): (.+)$', re.MULTILINE)
-HEREDOC = re.compile(r"<<-?[ \t]*(['\"]?)([A-Za-z_][A-Za-z0-9_]*)\1[^\n]*\n.*?^[ \t]*\2[ \t]*$",
+HEREDOC = re.compile(r"<<-?[ \t]*(?P<quote>['\"]?)(?P<delimiter>[A-Za-z_][A-Za-z0-9_]*)(?P=quote)"
+                     r"(?P<tail>[^\n]*)\n(?P<body>.*?)^[ \t]*(?P=delimiter)[ \t]*$",
                      re.DOTALL | re.MULTILINE)
 SEPARATORS = frozenset((';', ';;', '&&', '||', '|', '|&', '&', '(', ')'))
 REDIRECTS = frozenset(('>', '>>', '>|', '&>', '&>>'))
@@ -66,12 +67,70 @@ def shell_command(arguments):
     return value if isinstance(value, str) else ''
 
 
-def segment_targets(words, cwd):
-    """Return (targets, cwd_known) for one simple command; only the listed edit forms count."""
-    if not words:
-        return [], True
+def command_words(words):
     while words and re.fullmatch(r'[A-Za-z_][A-Za-z0-9_]*=.*', words[0]):
         words = words[1:]
+    return words
+
+
+def shell_tokens(command):
+    # A newline separates commands only outside quotes; patch arguments keep theirs.
+    separated, quote, escaped = [], None, False
+    for char in command:
+        if escaped:
+            escaped = False
+        elif char == '\\' and quote != "'":
+            escaped = True
+        elif quote:
+            if char == quote:
+                quote = None
+        elif char in ('"', "'"):
+            quote = char
+        elif char == '\n':
+            separated.append(' ; ')
+            continue
+        separated.append(char)
+    lexer = shlex.shlex(''.join(separated), posix=False, punctuation_chars=True)
+    lexer.whitespace_split = True
+    raw = list(lexer)
+    values = [''.join(shlex.split(token)) if any(quote in token for quote in '\'"') else token for token in raw]
+    return raw, values
+
+
+def heredoc_commands(command):
+    """Keep executable headers; only an apply_patch command owns patch stdin."""
+    parts, patch_files, end = [], [], 0
+    for match in HEREDOC.finditer(command):
+        parts.append(command[end:match.start()])
+        try:
+            raw, values = shell_tokens(''.join(parts))
+            words, index = [], 0
+            while index < len(raw):
+                token, value = raw[index], values[index]
+                if token == value and token in SEPARATORS:
+                    words = []
+                elif token == value and token in REDIRECTS | {'>&', '<&'}:
+                    if words and words[-1].isdigit() and raw[index - 1] == words[-1]:
+                        words.pop()
+                    index += 2
+                    continue
+                else:
+                    words.append(value)
+                index += 1
+            words = command_words(words)
+            if len(words) == 1 and Path(words[0]).name == 'apply_patch':
+                patch_files.extend(PATCH_FILES.findall(match['body']))
+        except ValueError:
+            pass  # Quoted or unparseable command text does not establish ownership.
+        parts.append(match['tail'] + '\n')
+        end = match.end()
+    parts.append(command[end:])
+    return ''.join(parts), patch_files
+
+
+def segment_targets(words, cwd):
+    """Return (targets, cwd_known) for one simple command; only the listed edit forms count."""
+    words = command_words(words)
     name = Path(words[0]).name if words else ''
     arguments = words[1:]
     if name == 'cd':
@@ -105,6 +164,9 @@ def segment_targets(words, cwd):
         files = files if in_place else []
     elif name == 'tee':
         files = [arg for arg in arguments if not arg.startswith('-')]
+    elif name == 'apply_patch':
+        files = [name for patch in arguments if patch.startswith('*** Begin Patch')
+                 for name in PATCH_FILES.findall(patch)]
     return files, True
 
 
@@ -112,15 +174,11 @@ def shell_edit_paths(payload):
     """Targets of known direct shell edits; unsupported or unresolvable forms yield nothing."""
     command = shell_command(payload.get('tool_input'))
     cwd = Path(payload['cwd'])
-    targets = []
-    if '*** Begin Patch' in command:
-        targets.extend(cwd / name.strip() for name in PATCH_FILES.findall(command))
+    header_commands, patch_files = heredoc_commands(command)
+    targets = [cwd / name.strip() for name in patch_files]
     try:
         # Non-POSIX lexing keeps quotes, so a quoted '>' or ';' is never an operator.
-        lexer = shlex.shlex(HEREDOC.sub('', command).replace('\n', ' ; '), posix=False, punctuation_chars=True)
-        lexer.whitespace_split = True
-        raw = list(lexer)
-        values = [''.join(shlex.split(token)) if any(quote in token for quote in '\'"') else token for token in raw]
+        raw, values = shell_tokens(header_commands)
     except ValueError:
         return [path.resolve() for path in targets]
     operator = lambda position: raw[position] == values[position] and raw[position]

@@ -142,13 +142,56 @@ The final reviewer returns JSON, with reasons grounded in inspected sources and 
   "cases": {
     "failed-request": {
       "status": "verified",
-      "reason": "Explain what the evidence establishes and which plausible failure it rejects"
+      "reason": "Explain what the evidence establishes and which plausible failure it rejects",
+      "validation": {
+        "path": {
+          "status": "verified",
+          "reason": "Identify the exercised caller, input and dependency state, including success versus fallback.",
+          "evidence": [{"capture": "regression-green", "quote": "Exact observation showing the intended path"}]
+        },
+        "discrimination": {
+          "status": "verified",
+          "reason": "Identify the specific wrong behavior and the assertion that would reject it.",
+          "evidence": [
+            {"capture": "contract-final", "quote": "Exact assertion or decisive source condition"},
+            {"capture": "regression-red", "quote": "Exact intended assertion failure"},
+            {"capture": "regression-green", "quote": "Exact successful result"}
+          ]
+        },
+        "causality": {
+          "status": "unknown",
+          "reason": "The failure is observed, but its proposed mechanism has not been isolated.",
+          "evidence": []
+        }
+      }
     }
   }
 }
 ```
 
 Use `changes_required` or `incomplete` when appropriate; a case may be `unresolved`.
+Final assessments require `validation`; a generic acceptance sentence no longer completes a fresh final check.
+Existing review artifacts remain historical evidence; obtain a fresh assessment rather than rewriting old captures.
+Plan assessments do not require these final observations.
+
+For `path`, confirm that the observation reached the intended behavior and dependency state.
+A passing fallback check does not verify the healthy dependency path; report the narrower scope or retain incomplete evidence.
+For `discrimination`, explain why the assertion rejects the named wrong behavior.
+An absence-only assertion that still passes when the relevant production gate is removed does not establish that gate's behavior.
+Reuse the existing failing check, counterexample or decisive source condition; this does not require a new mutation-testing stage.
+Both assessments require `verified`, a concrete reason and quoted evidence.
+Runtime path evidence must cite the selected `result`; discrimination must cite the selected `source` and `result`, plus the selected `baseline` for implementation.
+Source-only reviews cite the selected source for both assessments and explicitly limit their claims to source evidence.
+
+For `causality`, use `verified` only with quoted evidence supporting the claimed mechanism.
+Otherwise use `unknown` or `not_claimed` with a reason; an empty evidence list is allowed for these statuses.
+If the unknown cause prevents verification of the intended path or assertion, retain an unresolved assessment or blocker.
+Do not turn correlation, a test-runner guess or an unproven shared-state explanation into a confirmed cause.
+
+Each validation citation names a capture already included in the review's top-level `evidence`, with an exact nonempty quote from its artifact.
+Every citation must cover the same case and contain current source/check evidence; only the selected implementation baseline may be historical.
+The CLI checks these bindings, freshness and quote presence, including optional citations for unknown causes.
+The reviewer still determines whether the quoted observations support the claims: matching text alone cannot prove path coverage, test quality or causality.
 Reviewers may divide cases, but each verified case must cite its required evidence and every selected case needs assessment.
 Every referenced capture must already exist when the review is captured; the review binds its evidence manifests and output hashes.
 Changing those manifests or refreshing evidence requires a fresh assessment and review capture.

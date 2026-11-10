@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Check private behavior evidence before implementation or a readiness verdict."""
 import argparse
+import fcntl
 import fnmatch
 import hashlib
 import json
@@ -18,6 +19,10 @@ import uuid
 SCENARIOS = ('producer_consumer', 'transitions', 'time_and_data', 'shared_consumers', 'rendered_outputs', 'integration')
 CONTEXT_KEYS = ('TZ', 'LANG', 'LC_ALL', 'NODE_ENV', 'CI')
 OUTPUT_LIMIT = 2 * 1024 * 1024
+
+
+def state_root():
+    return Path(os.environ.get('AGENT_READINESS_STATE_DIR', Path.home() / '.local/state/agent-workflow/readiness'))
 
 
 def digest(data):
@@ -89,7 +94,7 @@ def probe_policy_path(record):
     return Path(explicit) if explicit else discovered
 
 
-def required_probes(record):
+def required_probes(record, all_probes=False):
     repo = record['repository']
     policy_path = probe_policy_path(record)
     if not policy_path:
@@ -112,7 +117,7 @@ def required_probes(record):
             raise ValueError('Probe paths must be nonempty glob strings.')
         if not isinstance(argv, list) or not argv or not all(isinstance(x, str) and x for x in argv):
             raise ValueError('Probe argv must be a nonempty list of strings.')
-        if any(fnmatch.fnmatchcase(os.fsdecode(file), pattern) for file in changed if file for pattern in patterns):
+        if all_probes or any(fnmatch.fnmatchcase(os.fsdecode(file), pattern) for file in changed if file for pattern in patterns):
             files = probe.get('files', [])
             if not isinstance(files, list) or not all(isinstance(x, str) and Path(x).is_absolute() for x in files):
                 raise ValueError('Probe files must be absolute paths to its verification program.')
@@ -128,7 +133,7 @@ def initialize(args):
     actor = args.actor or os.environ.get('CODEX_SESSION_ID') or os.environ.get('CLAUDE_SESSION_ID')
     if not actor:
         raise ValueError('Supply --actor with the author/coordinator session identity.')
-    path = args.record or Path.home() / '.local/state/agent-workflow/readiness' / (str(uuid.uuid4()) + '.json')
+    path = args.record or state_root() / (str(uuid.uuid4()) + '.json')
     outside_repo(path, state['repository'])
     if path.exists():
         raise ValueError('Record already exists; refusing to replace it.')
@@ -137,13 +142,26 @@ def initialize(args):
         'repository': state['repository'], 'base': base,
         'merge_base': git(state['repository'], 'merge-base', base, state['head']).decode().strip(),
         'initial_state': state,
+        'clarification': {'status': 'unchecked', 'reason': '', 'questions': [], 'evidence': []},
         'applicability': {key: {'applies': None, 'reason': '', 'cases': []} for key in SCENARIOS},
-        'cases': [], 'findings': [], 'captures': {}, 'reviews': [],
+        'cases': [], 'findings': [], 'captures': {}, 'reviews': [], 'plan_reviews': [],
         'probe_policy': str(args.probe_policy.resolve()) if args.probe_policy else None, 'probe_results': {},
     }
     policy = probe_policy_path(value)
     value['probe_policy'] = str(policy.resolve()) if policy else None
-    save(path, value)
+    index_path = state_root() / 'sessions' / (digest(actor.encode()) + '.json')
+    outside_repo(index_path, state['repository'])
+    index_path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+    with index_path.with_suffix('.lock').open('a') as lock:
+        fcntl.flock(lock, fcntl.LOCK_EX)
+        index = load(index_path) if index_path.exists() else {'version': 1, 'actor': actor, 'records': {}}
+        if index.get('actor') != actor or not isinstance(index.get('records'), dict):
+            raise ValueError('Invalid native-session readiness index: ' + str(index_path))
+        if path.exists():
+            raise ValueError('Record already exists; refusing to replace it.')
+        save(path, value)
+        index['records'][state['repository']] = str(path.resolve())
+        save(index_path, index)
     print(path)
     return 0
 
@@ -161,7 +179,7 @@ def capture(args):
     cases = {case['id'] for case in record['cases']}
     if not args.case or not set(args.case) <= cases:
         raise ValueError('Bind the capture to existing case IDs using --case.')
-    if args.kind == 'review' and (not args.reviewer or args.reviewer == record['actor']):
+    if args.kind in ('review', 'plan-review') and (not args.reviewer or args.reviewer == record['actor']):
         raise ValueError('Review capture needs a distinct --reviewer session identity.')
     before = snapshot(record['repository'])
     cwd = (Path(record['repository']) / args.cwd).resolve()
@@ -217,7 +235,7 @@ def capture(args):
         content = output.read(OUTPUT_LIMIT)
     after = snapshot(record['repository'])
     bindings = {}
-    if args.kind == 'review':
+    if args.kind in ('review', 'plan-review'):
         report = json.loads(content)
         if report.get('reviewer') != args.reviewer:
             raise ValueError('Reviewer JSON identity must match --reviewer.')
@@ -318,7 +336,7 @@ def check(args):
             errors.append(str(name) + ': empty or changed captured artifact.')
         if item.get('before') != item.get('after') or item.get('timed_out') or item.get('truncated'):
             errors.append(str(name) + ': capture changed code, timed out or exceeded output limit.')
-        if current_required and item.get('after') != current:
+        if current_required and args.phase != 'implementation' and item.get('after') != current:
             errors.append(str(name) + ': evidence is stale for the current HEAD/worktree.')
         if case_id and case_id not in item.get('cases', []):
             errors.append(str(name) + ': does not cover case ' + case_id)
@@ -330,17 +348,232 @@ def check(args):
     for case in cases:
         evidence(case.get('authority_source'), 'source', case.get('id'))
         evidence(case.get('source'), 'source', case.get('id'))
-    specification = {'mode': record.get('mode'), 'probes': probes, 'applicability': record.get('applicability'), 'cases': [
+
+    def quoted_source(reference, label):
+        if not isinstance(reference, dict) or not text(reference.get('source')) or not text(reference.get('quote')):
+            errors.append(label + ': cite a source capture and an exact nonempty quote.')
+            return None
+        name = reference['source']
+        if evidence(name, 'source') and reference['quote'].encode() not in contents[name]:
+            errors.append(label + ': quote is absent from the captured source.')
+        return name
+
+    clarification = record.get('clarification')
+    clarification_evidence = set()
+    if not isinstance(clarification, dict):
+        errors.append('Missing clarification assessment; add clarification using workflows/readiness.md before planning.')
+        clarification = {}
+    status = clarification.get('status')
+    if status == 'needs_user':
+        errors.append('Clarification needs_user: ask Luis to settle the policy choice before dependent implementation.')
+    elif status == 'needs_evidence':
+        errors.append('Clarification needs_evidence: investigate the factual gap before dependent implementation.')
+    elif status != 'clear':
+        errors.append('Clarification is unchecked: assess consequential choices before planning.')
+    if not text(clarification.get('reason')):
+        errors.append('Clarification requires a reason explaining how consequential choices are settled.')
+    questions = clarification.get('questions')
+    if not isinstance(questions, list) or not all(text(question) for question in questions):
+        errors.append('Clarification questions must be an explicit list; use [] when no material choice remains.')
+    references = clarification.get('evidence')
+    if not isinstance(references, list) or not references:
+        errors.append('Clarification requires quoted source evidence for the assessment.')
+        references = []
+    for reference in references:
+        name = quoted_source(reference, 'Clarification')
+        if name:
+            clarification_evidence.add(name)
+
+    findings = record.get('findings', [])
+    if not isinstance(findings, list) or not all(isinstance(finding, dict) for finding in findings):
+        errors.append('Findings must be a list of finding objects.')
+        findings = []
+    finding_evidence = set()
+    decisions = {}
+    for finding in findings:
+        decision = finding.get('kind') == 'decision'
+        if args.phase != 'final' and not decision:
+            continue
+        identifier = finding.get('id')
+        if decision:
+            if not text(identifier) or identifier in decisions:
+                errors.append('Decision IDs must be nonempty and unique.')
+                continue
+            resolution = finding.get('resolution')
+            decisions[identifier] = {
+                'status': finding.get('status'), 'reason': finding.get('reason'),
+                'resolution': {key: resolution.get(key) for key in ('kind', 'quote')}
+                if isinstance(resolution, dict) else None,
+            }
+        if finding.get('kind') not in ('blocker', 'decision', 'nonblocking'):
+            errors.append('Finding requires blocker, decision or nonblocking kind.')
+        if finding.get('status') not in ('open', 'fixed', 'refuted', 'deferred'):
+            errors.append('Finding requires an explicit disposition.')
+        if not text(finding.get('reason')):
+            errors.append('Finding disposition requires a reason.')
+        if finding.get('kind') != 'nonblocking' and finding.get('status') not in ('fixed', 'refuted'):
+            errors.append(str(identifier) + ': unresolved blocker or decision; settle the expected behavior before dependent work.')
+        refs = finding.get('evidence', [])
+        if not isinstance(refs, list) or not refs or not all(text(name) for name in refs):
+            errors.append(str(identifier) + ': disposition has no evidence.')
+            refs = []
+        for name in refs:
+            kind = captures.get(name, {}).get('kind')
+            if kind not in ('source', 'check'):
+                errors.append(str(name) + ': disposition needs current source or check evidence.')
+            else:
+                evidence(name, kind)
+            finding_evidence.add(name)
+        if decision and finding.get('status') in ('fixed', 'refuted'):
+            if not isinstance(resolution, dict) or resolution.get('kind') not in ('user_decision', 'requirement', 'verified_contract'):
+                errors.append(str(identifier) + ': decision resolution must cite a user_decision, requirement or verified_contract.')
+            name = quoted_source(resolution, str(identifier) + ' resolution')
+            if name and name not in refs:
+                errors.append(str(identifier) + ': resolution source must be included in finding evidence.')
+
+    specification = {key: record.get(key) for key in ('task', 'actor', 'repository', 'base', 'merge_base', 'mode')}
+    specification.update({'probes': required_probes(record, all_probes=True), 'applicability': record.get('applicability'), 'cases': [
         {key: case.get(key) for key in ('id', 'authority', 'authority_status', 'input', 'expected', 'check', 'method', 'failure')}
-        for case in cases]}
+        for case in cases], 'clarification': {
+            key: clarification.get(key) for key in ('status', 'reason', 'questions')
+        }, 'clarification_quotes': [reference.get('quote') if isinstance(reference, dict) else None for reference in references]})
     specification_hash = digest(json.dumps(specification, sort_keys=True).encode())
-    if args.phase == 'plan' and not errors:
-        record['plan'] = {'state': current, 'specification_sha256': specification_hash}
-        save(args.record, record)
-    if args.phase == 'final':
+
+    def assess_validation(case_id, assessment, references, label):
+        validation = assessment.get('validation')
+        if not isinstance(validation, dict):
+            errors.append(label + ': missing final validation of path, discrimination and causality.')
+            return False
+        initial_errors = len(errors)
+        case = next(case for case in cases if case['id'] == case_id)
+        runtime = case['method'] == 'runtime'
+        baseline = case.get('baseline') if runtime and record['mode'] == 'implementation' else None
+        for field in ('path', 'discrimination', 'causality'):
+            detail = validation.get(field)
+            prefix = label + ': validation ' + field
+            if not isinstance(detail, dict):
+                errors.append(prefix + ' requires an assessment object.')
+                continue
+            statuses = ('verified', 'unknown', 'not_claimed') if field == 'causality' else ('verified',)
+            if detail.get('status') not in statuses or not text(detail.get('reason')):
+                errors.append(prefix + ' requires a supported status and concrete reason.')
+            observations = detail.get('evidence')
+            if not isinstance(observations, list) or (detail.get('status') == 'verified' and not observations):
+                errors.append(prefix + ' requires cited observations.')
+                continue
+            cited = set()
+            for observation in observations:
+                if not isinstance(observation, dict) or not text(observation.get('capture')) or not text(observation.get('quote')):
+                    errors.append(prefix + ': cite a capture and exact nonempty quote.')
+                    continue
+                reference = observation['capture']
+                if reference not in references:
+                    errors.append(prefix + ': citation is not bound by this review: ' + reference)
+                    continue
+                kind = captures.get(reference, {}).get('kind')
+                historical = kind == 'baseline' and reference == baseline
+                if kind not in ('source', 'check') and not historical:
+                    errors.append(prefix + ': cite source, check or the selected implementation baseline: ' + reference)
+                    continue
+                item = evidence(reference, kind, case_id, current_required=not historical)
+                if item and observation['quote'].encode() not in contents[reference]:
+                    errors.append(prefix + ': quote is absent from capture ' + reference)
+                cited.add(reference)
+            if field in ('path', 'discrimination'):
+                required = {case.get('result')} if runtime else {case.get('source')}
+                if field == 'discrimination':
+                    required.add(case.get('source'))
+                    if baseline:
+                        required.add(baseline)
+                if not required <= cited:
+                    errors.append(prefix + ': cite the selected case evidence: ' + ', '.join(str(x) for x in required - cited))
+        return len(errors) == initial_errors
+
+    def assess_reviews(names, kind, required, case_evidence, state, plan_hash=None):
+        reviewed, reviewed_evidence = set(), set()
+        if not isinstance(names, list) or not names or not all(text(name) for name in names):
+            errors.append('Missing independent plan assessment.' if kind == 'plan-review' else 'Missing independent final assessment.')
+            return
+        for name in names:
+            item = evidence(name, kind, current_required=False)
+            if item is None:
+                continue
+            if item.get('after') != state:
+                errors.append(name + ': review is stale for its required source state.')
+            try:
+                review = json.loads(contents[name])
+                if not isinstance(review, dict):
+                    raise ValueError('Expected review object')
+            except ValueError:
+                errors.append(name + ': reviewer output must be JSON object.')
+                continue
+            identity = item.get('reviewer')
+            if not identity or identity == record['actor'] or review.get('reviewer') != identity:
+                errors.append(name + ': distinct reviewer identity is required (declared, not authenticated).')
+            if review.get('verdict') != 'accept':
+                errors.append(name + ': reviewer has not accepted the evidence.')
+            if kind == 'plan-review':
+                if review.get('plan_sha256') != plan_hash:
+                    errors.append(name + ': assessment does not match the reviewed plan specification.')
+                for field in ('clarification', 'coverage'):
+                    assessment = review.get(field, {})
+                    if assessment.get('status') != 'verified' or not text(assessment.get('reason')):
+                        errors.append(name + ': plan reviewer must assess ' + field + '.')
+            references = review.get('evidence', [])
+            if not isinstance(references, list) or not all(text(reference) for reference in references):
+                errors.append(name + ': review evidence must list capture IDs.')
+                continue
+            references = set(references)
+            if references != set(item.get('review_bindings', {})):
+                errors.append(name + ': review references differ from its captured bindings.')
+            for reference, bound in item.get('review_bindings', {}).items():
+                manifest = captures.get(reference)
+                if not manifest or digest(json.dumps(manifest, sort_keys=True).encode()) != bound:
+                    errors.append(name + ': reviewed evidence was changed after assessment: ' + reference)
+                    continue
+                historical = evidence(reference, manifest.get('kind'), current_required=False)
+                if kind == 'plan-review' and historical and historical.get('after') != state:
+                    errors.append(name + ': plan evidence is not at the reviewed source state: ' + reference)
+            reviewed_evidence.update(references)
+            assessments = review.get('cases', {})
+            if not isinstance(assessments, dict):
+                errors.append(name + ': review cases must be assessment objects.')
+                continue
+            for case_id, assessment in assessments.items():
+                if case_id in ids and isinstance(assessment, dict) and assessment.get('status') == 'verified' and text(assessment.get('reason')):
+                    if not set(case_evidence.get(case_id, [])) <= references:
+                        errors.append(name + ': reviewer did not account for case evidence: ' + case_id)
+                    elif kind != 'review' or assess_validation(case_id, assessment, references, name + ': ' + case_id):
+                        reviewed.add(case_id)
+                else:
+                    errors.append(name + ': case remains unresolved or unsupported: ' + case_id)
+        if set(ids) - reviewed:
+            errors.append('Missing independent assessment for: ' + ', '.join(str(x) for x in set(ids) - reviewed))
+        if not set(required) <= reviewed_evidence:
+            errors.append('Review records do not account for all required evidence and finding dispositions.')
+
+    plan = record.get('plan', {})
+    planned_decisions = decisions if args.phase == 'plan' else plan.get('decisions', {})
+    assessment_hash = digest(json.dumps({'specification': specification_hash, 'decisions': planned_decisions}, sort_keys=True).encode())
+    if args.phase == 'plan':
+        case_sources = {case['id']: [case.get('source'), case.get('authority_source')] for case in cases}
+        required = clarification_evidence | finding_evidence | {name for names in case_sources.values() for name in names}
+        assess_reviews(record.get('plan_reviews'), 'plan-review', required, case_sources, current, assessment_hash)
+        if not errors:
+            record['plan'] = {'state': current, 'specification_sha256': specification_hash, 'decisions': decisions,
+                              'reviews': record['plan_reviews'], 'required_evidence': sorted(required),
+                              'case_evidence': case_sources}
+            save(args.record, record)
+    else:
         if record.get('plan', {}).get('specification_sha256') != specification_hash:
             errors.append('Missing or changed plan: run plan check on the sourced expectations before implementation.')
-        required = set()
+        for identifier, disposition in record.get('plan', {}).get('decisions', {}).items():
+            if decisions.get(identifier) != disposition:
+                errors.append(identifier + ': planned decision was changed or removed; reconcile the plan before readiness.')
+        assess_reviews(plan.get('reviews'), 'plan-review', plan.get('required_evidence', []),
+                       plan.get('case_evidence', {}), plan.get('state'), assessment_hash)
+    if args.phase == 'final':
+        required = clarification_evidence | finding_evidence
         case_evidence = {}
         for case in cases:
             case_id = case['id']
@@ -376,27 +609,6 @@ def check(args):
                             errors.append(case_id + ': baseline differs from the planned source state.')
             elif record.get('mode') == 'implementation':
                 errors.append(case_id + ': source-only implementation verification remains incomplete in this pilot.')
-        for finding in record.get('findings', []):
-            if finding.get('kind') not in ('blocker', 'decision', 'nonblocking'):
-                errors.append('Finding requires blocker, decision or nonblocking kind.')
-            if finding.get('status') not in ('open', 'fixed', 'refuted', 'deferred'):
-                errors.append('Finding requires an explicit disposition.')
-            if not text(finding.get('reason')):
-                errors.append('Finding disposition requires a reason.')
-            if finding.get('kind') != 'nonblocking' and finding.get('status') not in ('fixed', 'refuted'):
-                errors.append(str(finding.get('id')) + ': unresolved blocker or decision.')
-            refs = finding.get('evidence', [])
-            if not refs:
-                errors.append(str(finding.get('id')) + ': disposition has no evidence.')
-            for name in refs:
-                kind = captures.get(name, {}).get('kind')
-                if kind not in ('source', 'check'):
-                    errors.append(str(name) + ': disposition needs current source or check evidence.')
-                else:
-                    evidence(name, kind)
-                required.add(name)
-        reviewed = set()
-        reviewed_evidence = set()
         for probe in probes:
             name = record.get('probe_results', {}).get(probe['id'])
             if not name:
@@ -416,43 +628,10 @@ def check(args):
                         errors.append(probe['id'] + ': required semantic probe did not pass.')
                 except (ValueError, AttributeError):
                     errors.append(probe['id'] + ': probe must return its JSON identity and pass status.')
-        for name in record.get('reviews', []):
-            item = captures.get(name, {})
-            if evidence(name, 'review') is None:
-                continue
-            try:
-                review = json.loads(contents[name])
-            except (ValueError, KeyError):
-                errors.append(name + ': reviewer output must be JSON.')
-                continue
-            identity = item.get('reviewer')
-            if not identity or identity == record['actor'] or review.get('reviewer') != identity:
-                errors.append(name + ': distinct reviewer identity is required (declared, not authenticated).')
-            if review.get('verdict') != 'accept':
-                errors.append(name + ': reviewer has not accepted the evidence.')
-            references = set(review.get('evidence', []))
-            if references != set(item.get('review_bindings', {})):
-                errors.append(name + ': review references differ from its captured bindings.')
-            for reference, bound in item.get('review_bindings', {}).items():
-                manifest = captures.get(reference)
-                if not manifest or digest(json.dumps(manifest, sort_keys=True).encode()) != bound:
-                    errors.append(name + ': reviewed evidence was changed after assessment: ' + reference)
-            reviewed_evidence.update(references)
-            for case_id, assessment in review.get('cases', {}).items():
-                if case_id in ids and assessment.get('status') == 'verified' and text(assessment.get('reason')):
-                    if not case_evidence[case_id] <= references:
-                        errors.append(name + ': reviewer did not account for case evidence: ' + case_id)
-                    else:
-                        reviewed.add(case_id)
-                else:
-                    errors.append(name + ': case remains unresolved or unsupported: ' + case_id)
-        if set(ids) - reviewed:
-            errors.append('Missing independent assessment for: ' + ', '.join(str(x) for x in set(ids) - reviewed))
-        if not required <= reviewed_evidence:
-            errors.append('Review records do not account for all required evidence and finding dispositions.')
+        assess_reviews(record.get('reviews'), 'review', required, case_evidence, current)
     print(json.dumps({'status': 'EVIDENCE INCOMPLETE' if errors else 'EVIDENCE COMPLETE',
                       'phase': args.phase, 'errors': errors,
-                      'required_probes': probes,
+                      'required_probes': probes, 'plan_sha256': assessment_hash,
                       'limits': 'Checks record completeness, captured output and source state; not semantic truth, authenticated independence or PR approval.'}, indent=2))
     return 1 if errors else 0
 
@@ -472,7 +651,7 @@ def main():
     run = commands.add_parser('capture', help='Run explicitly authorized argv; capture itself grants no extra execution authority.')
     run.add_argument('--record', type=Path, required=True)
     run.add_argument('--id', required=True)
-    run.add_argument('--kind', choices=('source', 'baseline', 'check', 'review'), required=True)
+    run.add_argument('--kind', choices=('source', 'baseline', 'check', 'review', 'plan-review'), required=True)
     run.add_argument('--case', action='append', default=[])
     run.add_argument('--reviewer')
     run.add_argument('--cwd', default='.')
@@ -481,7 +660,7 @@ def main():
     run.add_argument('argv', nargs=argparse.REMAINDER)
     verify = commands.add_parser('check', help='Validate without executing recorded commands.')
     verify.add_argument('--record', type=Path, required=True)
-    verify.add_argument('--phase', choices=('plan', 'final'), required=True)
+    verify.add_argument('--phase', choices=('plan', 'implementation', 'final'), required=True)
     args = parser.parse_args()
     return initialize(args) if args.command == 'init' else capture(args) if args.command == 'capture' else check(args)
 

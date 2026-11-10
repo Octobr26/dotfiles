@@ -3,6 +3,7 @@ import importlib.util
 import json
 import os
 from pathlib import Path
+import shlex
 import subprocess
 import sys
 import unittest
@@ -288,6 +289,40 @@ class NativeHookTests(unittest.TestCase):
 
     def test_supported_shell_edits_are_denied_without_enrollment(self):
         self.assert_shell_decisions(2)
+
+    def test_heredoc_header_writes_require_enrollment(self):
+        commands = (
+            "cat <<'EOF' > behavior.py\nvalue = 1\nEOF",
+            "cat <<'EOF' | tee behavior.py\nvalue = 1\nEOF",
+            "cat > behavior.py <<'EOF'\nvalue = 1\nEOF",
+        )
+        for command in commands:
+            for tool, key in (('Bash', 'command'), ('exec_command', 'cmd')):
+                with self.subTest(command=command, tool=tool):
+                    result = self.hook(required=True, tool=tool, arguments={key: command})
+                    self.assertEqual(result.returncode, 2,
+                                     'heredoc header writes must require readiness: ' + result.stderr)
+
+    def test_printed_patch_text_is_allowed_but_applied_patches_are_gated(self):
+        patch = '*** Begin Patch\n*** Update File: behavior.py\n@@\n-value = 0\n+value = 1\n*** End Patch'
+        commands = (
+            ("cat <<'EOF'\n" + patch + '\nEOF', 0),
+            ("printf '%s\\n' " + shlex.quote(patch), 0),
+            ("printf '%s\\n' apply_patch <<'EOF'\n" + patch + '\nEOF', 0),
+            ("printf '%s\\n' 'apply_patch 2>&1' <<'EOF'\n" + patch + '\nEOF', 0),
+            ("apply_patch <<'EOF'\n" + patch + '\nEOF', 2),
+            ("apply_patch > /dev/null <<'EOF'\n" + patch + '\nEOF', 2),
+            ("apply_patch 2>/dev/null <<'EOF'\n" + patch + '\nEOF', 2),
+            ("apply_patch 2>&1 <<'EOF'\n" + patch + '\nEOF', 2),
+            ('apply_patch ' + shlex.quote(patch), 2),
+        )
+        for command, expected in commands:
+            for tool, key in (('Bash', 'command'), ('exec_command', 'cmd')):
+                with self.subTest(command=command, tool=tool):
+                    result = self.hook(required=True, tool=tool, arguments={key: command})
+                    self.assertEqual(result.returncode, expected,
+                                     'only executed patches must require readiness: ' + result.stderr)
+        self.assertEqual(self.hook(required=True, tool='apply_patch', arguments=patch).returncode, 2)
 
     def test_supported_shell_edits_are_denied_without_accepted_plan(self):
         self.enroll()
