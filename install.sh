@@ -382,7 +382,7 @@ link_workflow_skills() {
         research setup-matt-pocock-skills to-spec to-tickets triage wayfinder wizard chief-of-staff claude-handoff
         loop-me setup-ts-deep-modules writing-beats writing-fragments writing-shape git-guardrails-claude-code
         migrate-to-shoehorn scaffold-exercises setup-pre-commit grill-me grilling teach to-questionnaire
-        wait-what writing-for-agents)
+        wait-what writing-for-agents gkdev-branch)
 
     for skill in "${skills[@]}"; do
         source="$DOTFILES_DIR/config/skills/$skill"

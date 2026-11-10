@@ -15,6 +15,7 @@ import shutil
 import sqlite3
 import subprocess
 import sys
+import time
 from zoneinfo import ZoneInfo
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -29,7 +30,8 @@ TURN_FIELDS = ('taskKey', 'sessionId', 'turnId', 'provider', 'startedAtMs',
                'completedAtMs', 'durationMs', 'timeToFirstTokenMs', 'complete',
                'model', 'delegatedModels', 'reasoningEffort', 'inputTokens',
                'cachedInputTokens', 'outputTokens', 'reasoningOutputTokens',
-               'totalTokens', 'usageEvents', 'toolCalls', 'toolFailures', 'usageStatus')
+               'totalTokens', 'usageEvents', 'toolCalls', 'toolFailures', 'usageStatus',
+               'commandFailureExitCodes', 'toolFailuresByName', 'interruptions')
 INTERVAL_SECONDS = 300
 OUTCOME_PROVIDERS = ('codex', 'claude')
 UNRATED_LISTED = 15
@@ -93,6 +95,37 @@ def within(path, workspace):
         return False
 
 
+def interruption_line(turns):
+    """Observed stop-requests; a fact about the turn, never an explicit outcome."""
+    stopped = [turn for turn in turns if turn.get('interruptions')]
+    return (f'Interrupted turns: {len(stopped)} of {len(turns)} ({sum(turn["interruptions"] for turn in stopped)} stop requests). '
+            'A stop request is observed telemetry, not a verdict; only `agent-workflow outcome` records one.')
+
+
+def failure_breakdown(turns):
+    """Summarize failure detail; turns captured before detail was stored count as unclassified."""
+    codes, tools = Counter(), Counter()
+    classified = 0
+    for turn in turns:
+        detail = sum(count for _, count in turn.get('commandFailureExitCodes') or [])
+        by_tool = sum(count for _, count in turn.get('toolFailuresByName') or [])
+        classified += max(detail, by_tool) if (detail or by_tool) else 0
+        for code, count in turn.get('commandFailureExitCodes') or []:
+            codes[(turn['provider'], code)] += count
+        for name, count in turn.get('toolFailuresByName') or []:
+            tools[name] += count
+    total = sum(turn.get('toolFailures', 0) for turn in turns)
+    if not classified:
+        return []
+    lines = [f'Failure detail covers {classified} of {total} signals.' + ('' if classified >= total else ' Older captures lack it.')]
+    if codes:
+        lines.append('Command exit codes: ' + ', '.join(f'{provider} {code}\u00d7{count}' for (provider, code), count in codes.most_common(8))
+                     + '. Exit 1 and 2 are typically search misses or test failures; 126, 127 and 128+ suggest real command problems.')
+    if tools:
+        lines.append('Claude failures by tool: ' + ', '.join(f'{name} {count}' for name, count in tools.most_common(6)) + '.')
+    return lines
+
+
 def merge_turn(previous, current):
     """Retain observed usage when an expired child transcript reduces coverage."""
     if not previous:
@@ -106,6 +139,11 @@ def merge_turn(previous, current):
     for key in ('model', 'reasoningEffort', 'durationMs', 'timeToFirstTokenMs', 'completedAtMs'):
         if result.get(key) is None:
             result[key] = previous.get(key)
+    # Failure breakdowns follow the high-water toolFailures total: keep the previous detail if it covers more failures.
+    for key in ('commandFailureExitCodes', 'toolFailuresByName'):
+        if sum(count for _, count in previous.get(key) or []) > sum(count for _, count in current.get(key) or []):
+            result[key] = previous[key]
+    result['interruptions'] = max(current.get('interruptions') or 0, previous.get('interruptions') or 0)
     result['complete'] = bool(current.get('complete') or previous.get('complete'))
     result['usageStatus'] = 'observed' if result['usageEvents'] else 'unavailable'
     result['usage_preservation'] = 'high-water' if reduced or previous.get('usage_preservation') == 'high-water' else 'current-snapshot'
@@ -398,21 +436,30 @@ def jev_report(db, config, cutoff):
               'Failed calls may have unreported provider usage. Jev cost is unknown; its tokens are separate from the API-equivalent subtotal.',
               'Acceptance mentions do not confirm task completion. Active human minutes, accepted delivery, rework and defects remain unknown.']
     uses = {}
+    applied_skills = {}
     path = STATE / 'jev-use.jsonl'
     if path.exists():
         for row in JEV['records'](path):
             if isinstance(row, dict) and row.get('status') in ('applied', 'overridden'):
                 uses[row.get('call_id')] = row['status']
-    decisions = set()
+                applied_skills[row.get('call_id')] = set(row.get('skills') or [])
+    recommended = {}
     path = STATE / 'decisions.jsonl'
     if path.exists():
-        decisions = {row.get('call_id') for row in JEV['records'](path) if isinstance(row, dict)}
+        recommended = {row.get('call_id'): (row.get('skill') or {}).get('choice')
+                       for row in JEV['records'](path) if isinstance(row, dict)}
+    decisions = set(recommended)
     routes = [row for row in successes if row.get('purpose') in ('skill-route', 'skill-recheck')
               and row['call_id'] in decisions]
     dispositions = Counter(uses.get(row['call_id'], 'unknown') for row in routes)
     lines += [f'Routed requests with shared telemetry: {len(routes)}; agent-reported applied: {dispositions["applied"]}; '
               f'overridden: {dispositions["overridden"]}; disposition unknown: {dispositions["unknown"]}.',
               'Route use is an agent declaration, not proof of benefit. Older route receipts lack shared call telemetry.']
+    # Independent of the agent's declared status: was the recommended skill among the skills it reported using?
+    judged = [row['call_id'] for row in routes if row['call_id'] in applied_skills and recommended.get(row['call_id']) != 'none']
+    matched = sum(recommended[call] in applied_skills[call] for call in judged)
+    lines += [f'Recommended skill among reported skills: {matched} of {len(judged)} routes with a declared use and a recommendation. '
+              'Always-on skills such as render-output are never recommended, so a route that only adds them still counts as a miss here.']
     last = db.execute('SELECT value FROM meta WHERE key="jev-enrichment"').fetchone()
     if last:
         status = json.loads(last[0])
@@ -504,6 +551,8 @@ def report(days=7, save=False):
               f'Native session cost estimates observed: {len(costs)} sessions. Whole-session sum: ${sum(costs.values()):.4f}.',
               'These estimates may include work outside the reporting window or workspace. They are not subscription charges and are not added to the request subtotal.',
               f'Tool failure signals: {sum(r.get("toolFailures", 0) for r in turns)}. A nonzero exit may be an expected search result rather than a defect.',
+              *failure_breakdown(turns),
+              interruption_line(turns),
               'Acceptance, human active minutes, rework time and PR/CI outcomes are not automatically established by this recorder.',
               'Commits are historical observations; rebases can leave observed commits that are no longer reachable. They are not task completion.',
               'A cleared conversation remains in captured history. Fresh sessions are separate; same branch does not prove same task.', '',
@@ -516,6 +565,7 @@ def report(days=7, save=False):
               'Polling is every five minutes while logged in and awake. Files removed before capture, unsupported telemetry and unflushed turns can be missed.', '']
     lines += enrichment_lines
     lines += outcome_lines(turns, latest_outcomes, config)
+    lines += readiness_lines(days)
     session_rows = {}
     for turn in turns:
         session_rows.setdefault((turn['provider'], turn['sessionId']), []).append(turn)
@@ -545,6 +595,20 @@ def report(days=7, save=False):
         print(result)
 
 
+SESSION_VARIABLES = ('CLAUDE_CODE_SESSION_ID', 'CLAUDE_SESSION_ID', 'CODEX_SESSION_ID')
+
+
+def latest_completed_key(session):
+    """Resolve a session's most recent completed turn; an unknown session is an error, never a guess."""
+    with connect() as db:
+        rows = [json.loads(row[0]) for row in db.execute('SELECT data FROM turns WHERE session_id=?', (session,))]
+    completed = [row for row in rows if row.get('complete')]
+    if not completed:
+        raise ValueError(f'No completed captured turn for session {session}; run agent-workflow collect first.')
+    latest = max(completed, key=lambda row: row.get('startedAtMs') or 0)
+    return f'{latest["provider"]}:{latest["taskKey"]}'
+
+
 def record_outcome(key, kind, note):
     """Append Luis's explicit feedback for one captured turn; never inferred."""
     provider, separator, turn_key = key.partition(':')
@@ -562,6 +626,36 @@ def record_outcome(key, kind, note):
         db.execute('INSERT INTO outcomes (provider, turn_key, kind, note, timestamp) VALUES (?,?,?,?,?)',
                    (provider, turn_key, kind, note, dt.datetime.now(dt.timezone.utc).timestamp()))
     print(f'Recorded {kind} for {key}.')
+
+
+def readiness_lines(days):
+    """Aggregate readiness-gate records: counts only, no task text, evidence or findings content."""
+    directory = STATE / 'readiness'
+    cutoff = time.time() - days * 86400
+    records = []
+    for path in directory.glob('*.json') if directory.exists() else []:
+        try:
+            data = json.loads(path.read_text())
+            recent = path.stat().st_mtime >= cutoff
+        except (OSError, ValueError):
+            continue
+        # Task records carry an actor; reviewer verdict files are summarized separately.
+        if recent and isinstance(data, dict):
+            records.append(data)
+    tasks = [row for row in records if 'actor' in row]
+    cases = [case for row in tasks for case in row.get('cases') or [] if isinstance(case, dict)]
+    findings = Counter(item.get('status') or 'unknown' for row in tasks for item in row.get('findings') or []
+                       if isinstance(item, dict))
+    verdicts = Counter(row['verdict'] for row in records if isinstance(row.get('verdict'), str))
+    if not tasks and not verdicts:
+        return []
+    modes = Counter(row.get('mode') or 'unknown' for row in tasks)
+    return ['', '## Readiness gates (recorded evidence, not outcomes)', '',
+            f'Gate records in window: {len(tasks)} ({", ".join(f"{mode} {count}" for mode, count in modes.most_common())}).',
+            f'Cases recorded: {len(cases)}; with captured failing evidence: {sum(bool(case.get("failure")) for case in cases)}.',
+            'Findings by status: ' + (', '.join(f'{status} {count}' for status, count in findings.most_common()) or 'none') + '.',
+            'Reviewer verdicts: ' + (', '.join(f'{verdict} {count}' for verdict, count in verdicts.most_common()) or 'none') + '.',
+            'These come from the gate records Luis\'s workflow writes; they show what was checked, not whether Luis accepted the result.']
 
 
 def outcome_lines(turns, latest_outcomes, config):
@@ -640,13 +734,24 @@ def main():
     commands.add_parser('status', help='Show capture and background-service status.')
     view = commands.add_parser('report', help='Print a report from durable captured records.')
     view.add_argument('--days', type=int, default=7)
-    feedback = commands.add_parser('outcome', help='Record your explicit acceptance or correction for one captured turn.')
-    feedback.add_argument('key', help='<provider>:<session>:<turn>, as listed in the report.')
+    feedback = commands.add_parser('outcome', help='Record Luis\'s explicit acceptance or correction for one captured turn; agents must not run it.')
+    feedback.add_argument('key', nargs='?', help='<provider>:<session>:<turn>, as listed in the report.')
+    feedback.add_argument('--last', action='store_true',
+                          help='Rate the latest completed turn of --session, or of the current session from its environment variable.')
+    feedback.add_argument('--session', help='Session ID for --last.')
     feedback.add_argument('--kind', required=True, choices=('acceptance', 'correction'))
     feedback.add_argument('--note', help='Optional short reason, kept privately.')
     args = parser.parse_args()
     if args.command == 'outcome':
-        record_outcome(args.key, args.kind, args.note)
+        if bool(args.key) == args.last or (args.session and not args.last):
+            parser.error('Give either a full turn key or --last [--session ID].')
+        key = args.key
+        if args.last:
+            session = args.session or next((os.environ[name] for name in SESSION_VARIABLES if os.environ.get(name)), None)
+            if not session:
+                parser.error('--last needs --session ID or a session environment variable; it never guesses.')
+            key = latest_completed_key(session)
+        record_outcome(key, args.kind, args.note)
     elif args.command == 'prepare':
         prepare(args.workspace)
     elif args.command == 'collect':

@@ -63,6 +63,54 @@ class ReplayTests(unittest.TestCase):
         self.assertIn('passed 1, failed 0, non-automated 0', result.stdout, MESSAGE)
         self.assertFalse((self.home / '.local/state/agent-workflow/reports').exists())
 
+    def test_skipped_or_unexecuted_suites_are_not_passes(self):
+        experiments = self.home / 'cases'
+        experiments.mkdir()
+        inputs = {
+            'skipped.py': PASSING.replace('    def test_ok', '    @unittest.skip("unavailable")\n    def test_ok'),
+            'class_skip.py': PASSING.replace('class Case', '@unittest.skip("unavailable")\nclass Case'),
+            'empty.py': 'import unittest\nunittest.main(exit=False)\n',
+            'not_run.py': PASSING.replace('unittest.main()', ''),
+        }
+        for name, source in inputs.items():
+            (experiments / name).write_text(source)
+        result = self.run_replay('--experiments', str(experiments))
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        for name in inputs:
+            self.assertIn(name, section(result.stdout, 'Non-automated'),
+                          'skipped or unexecuted suites must not count as passes')
+            self.assertNotIn(name, section(result.stdout, 'Passed'))
+        self.assertIn('passed 0, failed 0, non-automated 4', result.stdout)
+        self.assertIn('1 reported, 0 passed, 1 skipped', result.stdout)
+
+    def test_mixed_suite_preserves_main_guard_and_reports_skips(self):
+        experiments = self.home / 'cases'
+        experiments.mkdir()
+        source = PASSING.replace('unittest.main()',
+            'class Skipped(unittest.TestCase):\n'
+            '    @unittest.skip("unavailable")\n'
+            '    def test_skip(self):\n        self.fail("must not execute")\n\n'
+            'if __name__ == "__main__":\n    unittest.main()')
+        (experiments / 'mixed.py').write_text(source)
+        result = self.run_replay('--experiments', str(experiments))
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertIn('mixed.py', section(result.stdout, 'Passed'))
+        self.assertIn('2 reported, 1 passed, 1 skipped', result.stdout)
+        self.assertIn('passed 1, failed 0, non-automated 0', result.stdout)
+
+    def test_failure_of_tests_or_process_is_preserved(self):
+        experiments = self.home / 'cases'
+        experiments.mkdir()
+        (experiments / 'late_failure.py').write_text(
+            PASSING.replace('unittest.main()', 'unittest.main(exit=False)\nraise SystemExit(3)'))
+        (experiments / 'test_failure.py').write_text(FAILING.replace('unittest.main()', 'unittest.main(exit=False)'))
+        result = self.run_replay('--experiments', str(experiments))
+        self.assertNotEqual(result.returncode, 0, result.stdout + result.stderr)
+        for name in ('late_failure.py', 'test_failure.py'):
+            self.assertIn(name, section(result.stdout, 'Failed'),
+                          'test failures and process failures must remain failures')
+        self.assertIn('passed 0, failed 2, non-automated 0', result.stdout)
+
 
 if __name__ == '__main__':
     unittest.main()

@@ -25,6 +25,10 @@ agent-workflow outcome <provider>:<session>:<turn> --kind acceptance
 agent-workflow outcome <provider>:<session>:<turn> --kind correction --note "missed the empty state"
 ```
 
+To rate the last answer in the session you are in, run `agent-workflow outcome --last --kind acceptance|correction`.
+It resolves the current session from its environment variable (or `--session ID`) and rates that session's latest completed turn; it fails instead of guessing when the session is unknown.
+Only Luis runs it; agents must not record outcomes.
+
 Copy the key from the report's "Explicit outcomes" section, which lists the latest unrated completed turns and shows explicit-outcome coverage over completed turns.
 Keys must match a turn the collector already captured; unknown keys are rejected rather than assigned to the newest turn.
 Outcomes are append-only: a later acceptance after a correction becomes the current state, and an identical repeat is ignored.
@@ -32,13 +36,19 @@ Hooks, commits, passing tests, Jev labels and silence never set an outcome; unra
 The retired CVO logical-task commands in `workflow-metrics.mjs` are not used for outcomes; that script remains the collector's transcript parser.
 
 Replay deterministic private experiments on request with `agent-workflow-replay` (default directory `~/.local/state/agent-workflow/experiments/`).
-It runs top-level unittest files and `replay.json` manifests (`{"cases": [{"id", "argv", "expected_exit"}]}`), prints passed, failed and non-automated sections, exits nonzero on a failed expectation and writes no files.
+It runs top-level unittest files and `replay.json` manifests (`{"cases": [{"id", "argv", "expected_exit"}]}`), prints passed, failed and non-automated sections, exits nonzero on a failed expectation and writes no report files.
+Unittest replay observes standard `TextTestRunner` results while retaining each script's main entry point; a passing suite must contain at least one passing test.
+Its detail separates the runner's reported count, observed passing tests and skips; the reported count is not a count of executed test bodies or discovery coverage.
+Successful processes without observed passing tests are non-automated, including skipped-only suites and custom runners that bypass `TextTestRunner`; nonzero process exits remain failures.
 
 Ask either agent: "Review my agent-workflow report, reconcile related GitKraken sessions using ticket/PR/commit evidence, and suggest one change to reduce waiting."
 The generated daily report lists observed usage, models/effort, skill-loading evidence, Git activity, and the longest sessions to investigate.
 Reconciliation by an agent is an on-demand review; the scheduled recorder does not infer semantic task completion or query GitHub/Notion.
 Authorized workflow experiments live under `~/.local/state/agent-workflow/experiments/`; review their baseline and actual PR evidence alongside this report.
 Those private experiment records are written and reconciled by an agent on request, not automatically ingested or adjudicated by the collector.
+For live model experiments, define each scenario's required tool observations before running it and retain the raw trace, process result and relevant before/after state.
+Require those observations before a run is eligible for review; process exit zero, an unchanged file or an agent's final claim alone does not establish task completion.
+Mark missing or interrupted evidence incomplete, preserve failed runs without replacing them with retries, and review semantic correctness separately from evidence eligibility.
 Jev remains an advisory skill router and can also classify follow-ups and suggest an improvement experiment.
 Route decisions append metadata to `decisions.jsonl` separately from observed skill-loading records.
 An unavailable session environment variable leaves that decision's session binding unknown rather than guessing from a nearby conversation.

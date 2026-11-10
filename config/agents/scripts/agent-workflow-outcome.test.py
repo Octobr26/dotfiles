@@ -11,6 +11,7 @@ import unittest
 
 HERE = Path(__file__).resolve().parent
 CLI = HERE.parents[2] / 'scripts/agent-workflow'
+SESSION_VARIABLES = ('CLAUDE_CODE_SESSION_ID', 'CLAUDE_SESSION_ID', 'CODEX_SESSION_ID')
 MESSAGE = 'outcome command must record explicit feedback for a captured turn'
 
 
@@ -42,9 +43,11 @@ class OutcomeTests(unittest.TestCase):
                 db.execute('INSERT INTO turns VALUES (?,?,?,?,?)', (provider, key, session, started, json.dumps(data)))
             db.execute('INSERT INTO commits VALUES (?,?,?)', (str(workspace / 'repo'), 'a' * 40, now / 1000))
 
-    def cli(self, *args):
+    def cli(self, *args, env=None):
+        # Real session variables must not leak in and silently bind a test to the developer's session.
+        base = {k: v for k, v in os.environ.items() if k not in SESSION_VARIABLES}
         return subprocess.run([sys.executable, str(CLI), *args], text=True, capture_output=True,
-                              env={**os.environ, 'HOME': str(self.home)}, timeout=120)
+                              env={**base, 'HOME': str(self.home), **(env or {})}, timeout=120)
 
     def rows(self):
         with sqlite3.connect(self.db) as db:
@@ -72,6 +75,26 @@ class OutcomeTests(unittest.TestCase):
             self.assertEqual(self.cli(*arguments).returncode, 0, MESSAGE)
         self.assertEqual([row[2:] for row in self.rows()],
                          [('correction', 'fix a'), ('correction', 'fix b'), ('acceptance', None)], MESSAGE)
+
+    def test_last_rates_the_latest_completed_turn_of_the_named_session(self):
+        result = self.cli('outcome', '--last', '--session', 'sess-a', '--kind', 'acceptance')
+        self.assertEqual(result.returncode, 0, MESSAGE + '\n' + result.stdout + result.stderr)
+        self.assertEqual(self.rows(), [('codex', 'sess-a:turn-3', 'acceptance', None)], MESSAGE)
+
+    def test_last_binds_to_the_session_environment_and_skips_incomplete_turns(self):
+        result = self.cli('outcome', '--last', '--kind', 'correction', '--note', 'fix a',
+                          env={'CLAUDE_CODE_SESSION_ID': 'sess-b'})
+        self.assertEqual(result.returncode, 0, MESSAGE + '\n' + result.stdout + result.stderr)
+        self.assertEqual(self.rows(), [('claude', 'sess-b:turn-1', 'correction', 'fix a')], MESSAGE)
+
+    def test_last_never_guesses_a_session(self):
+        for arguments, env in ((('outcome', '--last', '--kind', 'acceptance'), None),
+                               (('outcome', '--last', '--session', 'sess-x', '--kind', 'acceptance'), None),
+                               (('outcome', 'codex:sess-a:turn-1', '--last', '--kind', 'acceptance'), None),
+                               (('outcome', '--kind', 'acceptance'), None)):
+            with self.subTest(arguments=arguments):
+                self.assertNotEqual(self.cli(*arguments, env=env).returncode, 0, MESSAGE)
+        self.assertEqual(self.rows(), [], 'a rejected request must not write an outcome')
 
     def test_report_shows_explicit_coverage_and_leaves_other_turns_unknown(self):
         # turn-2 has a commit in the window and turn-3 is silent: both must stay unknown.

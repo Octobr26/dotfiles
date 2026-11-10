@@ -19,13 +19,18 @@ PROMPT_LIMIT = 1600
 BATCH_SIZE = 20
 CATEGORIES = JEV['TASK_TYPES']
 CREW_COORDINATORS = {'implement-spec', 'chief-of-staff', 'claude-handoff'}
+# Applied on every task by global instructions or by routing itself, so Jev never recommends them.
+ALWAYS_ON_SKILLS = {'render-output', 'jev-workflow'}
 
 
 def catalog(mode):
     items = json.loads((ROOT / 'config/skills/matt-pocock-manifest.json').read_text())
+    upstream = {item['name']: item['experimental'] for item in items}
+    # Local skills outside the upstream manifest are routable too, so Jev can recommend what is actually installed.
+    local = sorted(path.parent.name for path in (ROOT / 'config/skills').glob('*/SKILL.md')
+                   if path.parent.name not in upstream and path.parent.name not in ALWAYS_ON_SKILLS)
     result = {}
-    for item in items:
-        name = item['name']
+    for name, experimental in [*upstream.items(), *((name, False) for name in local)]:
         if mode == 'firstmate' and name in CREW_COORDINATORS:
             continue
         text = (ROOT / 'config/skills' / name / 'SKILL.md').read_text()
@@ -34,7 +39,7 @@ def catalog(mode):
         description = match.group(1).strip().strip('"\x27') if match else name
         result[name] = {'description': description,
                         'user_invoked': bool(re.search(r'^disable-model-invocation:\s*true$', header, re.M)),
-                        'experimental': item['experimental']}
+                        'experimental': experimental}
     return result
 
 
@@ -144,13 +149,18 @@ def scan(days, limit, session_files=None):
             'coverage': 'Observed user turns, not completed tasks or time spent. Excerpts are truncated. Context/operational rows are filtered best-effort. Skill calls are loading evidence, not successful application. Mode is inferred only for a coordinator launched in the known Firstmate home; other sessions and workers remain unknown. Pi is not scanned.'}
 
 
-def evaluate(state, questions, purpose='historical-categorization'):
-    provider = 'unknown'
-    session = os.environ.get('CODEX_SESSION_ID') or os.environ.get('CLAUDE_SESSION_ID')
+def current_session():
+    """Return (provider, session ID) from the agent's environment; Claude Code sets CLAUDE_CODE_SESSION_ID."""
     if os.environ.get('CODEX_SESSION_ID'):
-        provider = 'codex'
-    elif os.environ.get('CLAUDE_SESSION_ID'):
-        provider = 'claude'
+        return 'codex', os.environ['CODEX_SESSION_ID']
+    for name in ('CLAUDE_CODE_SESSION_ID', 'CLAUDE_SESSION_ID'):
+        if os.environ.get(name):
+            return 'claude', os.environ[name]
+    return 'unknown', None
+
+
+def evaluate(state, questions, purpose='historical-categorization'):
+    provider, session = current_session()
     return JEV['evaluate'](state, questions, purpose, {'provider': provider, 'session_id': session})
 
 
@@ -185,7 +195,7 @@ def main():
         command.add_argument('--jev', action='store_true', help='Send prompt excerpts to TypeSafe; authorize the selected scope after a separate local preview.')
     args = parser.parse_args()
     if args.command == 'record-use':
-        session = os.environ.get('CODEX_SESSION_ID') or os.environ.get('CLAUDE_SESSION_ID')
+        session = current_session()[1]
         calls = [row for row in JEV['call_history']() if row.get('call_id') == args.call_id
                  and row.get('status') == 'success' and row.get('purpose') in ('skill-route', 'skill-recheck')]
         if not calls or not session or calls[0].get('session_id') != session:
@@ -243,7 +253,7 @@ def main():
             receipt = {key: output[key] for key in ('mode', 'category', 'skill', 'model', 'usage', 'prompt_sha256')}
             receipt.update({key: output[key] for key in ('call_id', 'latency_ms', 'recheck_status', 'ranking_call_id')})
             receipt['timestamp'] = dt.datetime.now(dt.timezone.utc).isoformat()
-            receipt['session_id'] = os.environ.get('CODEX_SESSION_ID') or os.environ.get('CLAUDE_SESSION_ID')
+            receipt['session_id'] = current_session()[1]
             receipt['session_binding'] = 'environment' if receipt['session_id'] else 'unknown'
             fd = os.open(ledger, os.O_WRONLY | os.O_CREAT | os.O_APPEND, 0o600)
             with os.fdopen(fd, 'a') as stream:

@@ -13,6 +13,8 @@ Luis delegates routine skill selection within an authorized task; he does not ne
 State the next skill, the concrete reason it fits, and what its result will establish, then load and apply it.
 This delegation includes user-invoked supporting skills, but not a larger orchestration workflow, a model change, or authority beyond the task.
 Respect explicit skill choices and project workflow ownership.
+Jev recommends skills and task categories; its returned `model` identifies the classifier, not the implementation or review model.
+When the selected workflow delegates, use [model and delegation routing](../../agents/workflows/model-routing.md) for executor choice and effective-model readback; preserve Luis's explicit model selection.
 
 At a phase boundary, explain the important finding, any material decision still open, and the next check or skill.
 Reuse the current route when the next step is clear; consult Jev again only when the task changes or competing routes would materially change the work.
