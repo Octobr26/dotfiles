@@ -38,11 +38,42 @@ Its challenge route uses bounded, evidence-driven skepticism and adjudication fo
 `config/claude/agents/` provides user-level Claude Code subagents with explicit model selection and supported effort settings for the universal workflow. The installer links each definition into `~/.claude/agents/` without taking ownership of unrelated personal subagents.
 It also moves legacy agent symlinks owned by this checkout into the install backup directory.
 
-`config/skills/` contains five locally adapted, revision-pinned skills for TDD, bug diagnosis, handoff, domain modeling, and codebase design.
-It also owns `render-output`, the shared final-response format for both providers.
-The installer links each canonical directory into both `~/.codex/skills/` and `~/.claude/skills/`, preserving and reporting conflicting personal skill names.
+The three agent-related source directories have separate jobs:
+
+| Edit here | Purpose | Installed entry points |
+| --- | --- | --- |
+| `config/agents/` | Shared instructions, workflows, and their supporting scripts | `~/.codex/AGENTS.md` and `~/.claude/CLAUDE.md` reach the same global source |
+| `config/skills/` | Shared reusable skills, including local adaptations and pinned imports | `~/.agents/skills/<name>` for Codex and `~/.claude/skills/<name>` for Claude |
+| `config/claude/agents/` | Claude-specific subagent definitions | `~/.claude/agents/<name>.md` |
+
+The installer links each shared skill to one canonical source in this checkout.
+Every directory under `config/skills/` containing `SKILL.md` is installed, so adding a skill needs no second name list.
+It migrates only its own legacy `~/.codex/skills/` links, backs up the retired links, and preserves conflicting personal installations.
+The native directories also contain provider state, bundled skills, plugins, and CLI-installed skills; those retain their existing owners.
 Universal workflows load them only when relevant; handoff remains explicitly requested.
 See [the catalog](config/skills/README.md) for sources and updates, and [the integration plan](docs/agent-skills-plan.md) for routing and verification.
+
+Run `skill-usage --installed --days 30` for observed use across installed standalone personal skills.
+Add `--json` to see each installation path and its resolved source.
+The default `skill-usage --days 30` remains scoped to the imported Matt Pocock collection.
+An installation shows what is present; transcript observations show recorded calls or reads, with shell path mentions reported separately.
+Zero observations means not observed, not unused; this report does not measure enabled plugins, active hooks, or successful application.
+
+To refresh only skills from a clean checkout of `main`, without package updates:
+
+```sh
+git pull --ff-only
+bash -c 'source ./install.sh; link_workflow_skills'
+skill-usage --check-installation
+```
+
+The installation check is read-only and exits nonzero for missing, changed, or legacy managed installations.
+Add `--json` for per-skill hashes; compare `source_digest` across machines at the same clean revision to check that maintained skill contents match.
+CLI-installed skills such as `rex` and `no-mistakes` are listed separately and remain owned by those tools.
+
+`conventional-commits` preserves the ticket-first rule for `gitkraken.dev` and follows each other repository's own convention before its fallback.
+`write-today` keeps its reusable procedure here; personal Notion destinations, checkout paths and scheduling details belong under `~/.config/agent-context/write-today/`.
+Transfer that private context separately when setting up another machine, or establish the intended destination in the session before saving a work log.
 
 ## Install
 

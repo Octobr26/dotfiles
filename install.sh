@@ -304,9 +304,9 @@ link_file() {
         printf 'link: %s -> %s\n' "$target" "$source"
     else
         if [ -d "$source" ]; then
-            cp -R "$source" "$target"
+            cp -R "$source" "$target" || return 1
         else
-            cp "$source" "$target"
+            cp "$source" "$target" || return 1
         fi
         printf 'copy: %s -> %s (symlink unavailable)\n' "$source" "$target"
     fi
@@ -375,35 +375,51 @@ link_workflow_agents() {
 }
 
 link_workflow_skills() {
-    local skill provider target source shared_skill
+    local skill directory target source legacy_skill
     local conflicts=0
-    local skills=(tdd diagnosing-bugs handoff domain-modeling codebase-design render-output gh-axi retro typesafe-ai jev-workflow
-        ask-matt code-review grill-with-docs implement-spec implement improve-codebase-architecture pr prototype
-        research setup-matt-pocock-skills to-spec to-tickets triage wayfinder wizard chief-of-staff claude-handoff
-        loop-me setup-ts-deep-modules writing-beats writing-fragments writing-shape git-guardrails-claude-code
-        migrate-to-shoehorn scaffold-exercises setup-pre-commit grill-me grilling teach to-questionnaire
-        wait-what writing-for-agents gkdev-branch)
+    local found=0
 
-    for skill in "${skills[@]}"; do
-        source="$DOTFILES_DIR/config/skills/$skill"
-        for provider in codex claude; do
-            target="$HOME/.$provider/skills/$skill"
-            # Codex also discovers shared skills; do not install a second copy.
-            shared_skill="$HOME/.agents/skills/$skill"
-            if [ "$provider" = codex ] && { [ -e "$shared_skill" ] || [ -L "$shared_skill" ]; }; then
-                printf 'conflict: %s already exists; leaving %s unchanged\n' "$shared_skill" "$target" >&2
-                conflicts=1
-                continue
-            fi
+    for source in "$DOTFILES_DIR"/config/skills/*; do
+        [ -f "$source/SKILL.md" ] || continue
+        found=1
+        skill=${source##*/}
+        for directory in .agents .claude; do
+            target="$HOME/$directory/skills/$skill"
+            legacy_skill="$HOME/.codex/skills/$skill"
             if { [ -e "$target" ] || [ -L "$target" ]; } &&
                { [ ! -L "$target" ] || [ "$(readlink "$target")" != "$source" ]; }; then
                 printf 'conflict: preserving existing skill %s\n' "$target" >&2
                 conflicts=1
                 continue
             fi
-            link_file "$source" "$target"
+            # Preserve foreign legacy installs instead of creating a duplicate name.
+            if [ "$directory" = .agents ] &&
+               { [ -e "$legacy_skill" ] || [ -L "$legacy_skill" ]; } &&
+               { [ ! -L "$legacy_skill" ] || [ "$(readlink "$legacy_skill")" != "$source" ]; }; then
+                printf 'conflict: preserving existing skill %s\n' "$legacy_skill" >&2
+                conflicts=1
+                continue
+            fi
+            if ! link_file "$source" "$target"; then
+                conflicts=1
+                continue
+            fi
+            if [ "$directory" = .agents ] && [ -L "$legacy_skill" ] &&
+               [ "$(readlink "$legacy_skill")" = "$source" ]; then
+                if ! mkdir -p "$BACKUP_DIR/codex-skills" ||
+                   ! mv "$legacy_skill" "$BACKUP_DIR/codex-skills/$skill"; then
+                    printf 'warn: could not back up legacy skill %s\n' "$legacy_skill" >&2
+                    conflicts=1
+                    continue
+                fi
+                printf 'migrate: %s -> %s (old link backed up)\n' "$legacy_skill" "$target"
+            fi
         done
     done
+    if [ "$found" = 0 ]; then
+        printf 'warn: no shared skill sources found in %s/config/skills\n' "$DOTFILES_DIR" >&2
+        return 1
+    fi
     return "$conflicts"
 }
 

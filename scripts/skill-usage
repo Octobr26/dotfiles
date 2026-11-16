@@ -3,6 +3,7 @@
 
 import argparse
 import datetime as dt
+import hashlib
 import json
 import os
 from pathlib import Path
@@ -14,6 +15,7 @@ ROOT = Path(__file__).resolve().parent.parent
 MANIFEST = ROOT / 'config/skills/matt-pocock-manifest.json'
 SKILL_PATH = re.compile(r'(?:\.codex/skills|\.claude/skills|\.agents/skills|config/skills)/([a-z0-9-]+)/SKILL\.md')
 ENDPOINT = 'https://api.typesafe.ai/v1/systemone'
+SKILL_CACHE_DIRECTORIES = {'.git', '__pycache__'}
 
 
 def timestamp(value):
@@ -56,11 +58,76 @@ def classify(tool, value, names):
     return {name: 'path_references' for name in SKILL_PATH.findall(raw) if name in names}
 
 
-def report(days):
+def installed_inventory(inventory):
+    known = {item['name']: item for item in inventory}
+    rows = {}
+    roots = [('codex', Path.home() / '.agents/skills'),
+             ('codex', Path.home() / '.codex/skills'),
+             ('claude', Path.home() / '.claude/skills')]
+    for provider, base in roots:
+        if not base.is_dir():
+            continue
+        for path in sorted(base.iterdir()):
+            if path.name.startswith('.') or not (path / 'SKILL.md').is_file():
+                continue
+            row = rows.setdefault(path.name, {'name': path.name,
+                'experimental': known.get(path.name, {}).get('experimental', False), 'locations': []})
+            row['locations'].append({'provider': provider, 'path': str(path),
+                'source': str(path.resolve()), 'symlink': path.is_symlink()})
+    return list(rows.values())
+
+
+def skill_digest(path):
+    files = [(item.relative_to(path).as_posix(), hashlib.sha256(item.read_bytes()).hexdigest())
+             for item in sorted(path.rglob('*')) if item.is_file()
+             and not SKILL_CACHE_DIRECTORIES.intersection(item.relative_to(path).parts)
+             and item.suffix != '.pyc' and item.name != '.DS_Store']
+    return hashlib.sha256(json.dumps(files, separators=(',', ':')).encode()).hexdigest()
+
+
+def installation_report():
+    rows, issues = [], []
+    for entry in sorted((ROOT / 'config/skills').glob('*/SKILL.md')):
+        source = entry.parent
+        digest = skill_digest(source)
+        locations = []
+        for provider, directory in [('codex', '.agents'), ('claude', '.claude')]:
+            target = Path.home() / directory / 'skills' / source.name
+            if not target.exists():
+                status = 'missing'
+            elif target.is_symlink() and target.resolve() == source.resolve():
+                status = 'linked'
+            elif target.is_dir() and not target.is_symlink() and skill_digest(target) == digest:
+                status = 'copied'
+            else:
+                status = 'drift'
+            locations.append({'provider': provider, 'path': str(target), 'status': status})
+            if status not in {'linked', 'copied'}:
+                issues.append(f'{source.name}: {provider} installation is {status}: {target}')
+        legacy = Path.home() / '.codex/skills' / source.name
+        if legacy.exists() or legacy.is_symlink():
+            issues.append(f'{source.name}: legacy Codex installation remains: {legacy}')
+        rows.append({'name': source.name, 'sha256': digest, 'locations': locations})
+    if not rows:
+        issues.append('No canonical skill sources found in this checkout.')
+    names = {row['name'] for row in rows}
+    other = [row for row in installed_inventory([]) if row['name'] not in names]
+    fingerprints = [(row['name'], row['sha256']) for row in rows]
+    return {'inventory': 'managed-installation', 'skills': rows, 'issues': issues,
+            'source_digest': hashlib.sha256(json.dumps(fingerprints, separators=(',', ':')).encode()).hexdigest(),
+            'other_installed_skills': other}
+
+
+def report(days, installed=False):
     inventory = json.loads(MANIFEST.read_text())
+    if installed:
+        inventory = installed_inventory(inventory)
     rows = {item['name']: {'name': item['name'], 'experimental': item['experimental'],
             'invocations': 0, 'file_reads': 0, 'path_references': 0, 'sessions': 0}
             for item in inventory}
+    if installed:
+        for item in inventory:
+            rows[item['name']]['locations'] = item['locations']
     seen = set()
     skill_sessions = {name: set() for name in rows}
     cutoff = dt.datetime.now(dt.timezone.utc).timestamp() - days * 86400
@@ -98,10 +165,14 @@ def report(days):
             sessions_observed += int(observed)
     for name, row in rows.items():
         row['sessions'] = len(skill_sessions[name])
+    coverage = 'Best-effort Codex and Claude transcript evidence. Invocations and reads are tool calls, not proof of successful application. Shell/code path references are weaker evidence. Auto-loaded context and unsupported tools may be absent. Zero means not observed, not unused.'
+    if installed:
+        coverage += ' Inventory covers top-level standalone personal skill folders, not plugins, bundled skills, synced account skills, configured enablement, or actual provider discovery. JSON locations identify installed paths and their resolved sources.'
     return {'generated_at': dt.datetime.now(dt.timezone.utc).isoformat(), 'days': days,
+            'inventory': 'installed-personal' if installed else 'matt-pocock-collection',
             'files_scanned': files_scanned, 'sessions_observed': sessions_observed,
             'malformed_lines': malformed_lines,
-            'coverage': 'Best-effort Codex and Claude transcript evidence. Invocations and reads are tool calls, not proof of successful application. Shell/code path references are weaker evidence. Auto-loaded context and unsupported tools may be absent. Zero means not observed, not unused.',
+            'coverage': coverage,
             'skills': sorted(rows.values(), key=lambda r: (-r['invocations'], -r['file_reads'], -r['path_references'], r['name']))}
 
 
@@ -117,6 +188,9 @@ def api_key():
 
 
 def review(data):
+    # Jev receives aggregate evidence, never personal installation/source paths.
+    data = {**data, 'skills': [{key: value for key, value in row.items() if key != 'locations'}
+                              for row in data['skills']]}
     questions = {}
     for index, row in enumerate(data['skills']):
         questions[f's{index}'] = {
@@ -144,17 +218,38 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--days', type=int, default=30)
     parser.add_argument('--json', action='store_true')
+    scope = parser.add_mutually_exclusive_group()
+    scope.add_argument('--installed', action='store_true',
+                       help='Inventory installed standalone personal skills, including skills outside the upstream collection.')
+    scope.add_argument('--check-installation', action='store_true',
+                       help='Check managed skill installations against this checkout without scanning transcripts or changing files.')
     parser.add_argument('--jev', action='store_true', help='Send aggregate skill counts only to Jev for a review list.')
     args = parser.parse_args()
     if args.days < 1:
         parser.error('--days must be positive')
-    data = report(args.days)
+    if args.check_installation:
+        if args.jev:
+            parser.error('--check-installation is local-only and cannot be combined with --jev')
+        data = installation_report()
+        if args.json:
+            print(json.dumps(data, indent=2))
+        else:
+            print(f"{len(data['skills'])} managed skills | {len(data['issues'])} installation issues | {len(data['other_installed_skills'])} other installed skills")
+            print('Source digest: ' + data['source_digest'])
+            for issue in data['issues']:
+                print(issue)
+        return int(bool(data['issues']))
+    data = report(args.days, installed=args.installed)
     if args.jev:
         data['jev_review'] = review(data)
     if args.json or args.jev:
         print(json.dumps(data, indent=2))
     else:
-        print(f"{len(data['skills'])} skills | {data['sessions_observed']} transcript files with recent activity | {args.days} days")
+        scope = 'installed personal skills' if args.installed else 'collection skills'
+        print(f"{len(data['skills'])} {scope} | {data['sessions_observed']} transcript files with recent activity | {args.days} days")
+        strong = sum(bool(row['invocations'] or row['file_reads']) for row in data['skills'])
+        mentions = sum(not (row['invocations'] or row['file_reads']) and bool(row['path_references']) for row in data['skills'])
+        print(f"Observed invocation/read: {strong} | Path references only: {mentions} | Not observed: {len(data['skills']) - strong - mentions}")
         print('Skill                              Invocations  Reads  Path references')
         for row in data['skills']:
             print(f"{row['name']:34} {row['invocations']:11} {row['file_reads']:6} {row['path_references']:16}")
@@ -163,6 +258,6 @@ def main():
 
 if __name__ == '__main__':
     try:
-        main()
+        sys.exit(main())
     except (ValueError, OSError) as error:
         sys.exit(str(error))

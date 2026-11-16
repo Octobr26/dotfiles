@@ -1,0 +1,4 @@
+interface:
+  display_name: "Write Today — GitKraken"
+  short_description: "Daily GitKraken work logs and scrum preparation"
+  default_prompt: "Use $write-today to draft my GitKraken daily log from GitHub, local work, and my notes."
